@@ -23,7 +23,7 @@ Dokumentasi lengkap:
 - **Backend**: Express + TypeScript, SQLite (`better-sqlite3`)
 - **Frontend**: Vue 3 + Vite
 - **Bot**: Telegraf (Node.js/TypeScript)
-- **AI teks**: OpenRouter / DeepSeek
+- **AI teks**: multi-provider (OpenRouter, OpenCode Zen, Google AI, Anthropic, OpenAI, DeepSeek) — admin pilih provider + model per aksi generate, lihat `planning.md` §5a
 - **AI gambar**: Gemini 3 Pro Image (Nano Banana Pro), via abstraksi `ImageProvider`
 - **Chart**: `chartjs-node-canvas` → PNG
 - **Diagram**: `mermaid-cli` (headless) → SVG/PNG
@@ -50,23 +50,31 @@ Backend:
 
 ```bash
 cd backend
-cp .env.example .env   # isi kredensial/konfigurasi
+cp .env.example .env   # isi kredensial/konfigurasi + minimal 1 API key provider AI teks
 npm install
 npm run dev
 ```
 
-Atau via Docker Compose (dev):
+Frontend (di terminal terpisah, backend harus sudah jalan di port 3011):
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Atau jalankan keduanya sekaligus via Docker Compose (dev):
 
 ```bash
 docker compose -f docker-compose.dev.yml up
 ```
 
-Script backend yang tersedia: `npm run dev`, `npm run build`, `npm run start`, `npm run lint`, `npm run lint:fix`, `npm run test`, `npm run test:watch`.
+Script yang tersedia di `backend/` dan `frontend/`: `npm run dev`, `npm run build`, `npm run lint`, `npm run lint:fix`, `npm run test`, `npm run test:watch` (backend juga punya `npm run start` untuk jalankan hasil build).
 
 ## Status Implementasi
 
 - [x] Stage 1 — Scaffold & Database
-- [ ] Stage 2 — Outline & Bab
+- [x] Stage 2 — Outline & Bab
 - [ ] Stage 3 — Generate Konten Bab (Teks + Tabel)
 - [ ] Stage 4 — Chart & Diagram Rendering
 - [ ] Stage 5 — Gambar (AI + Upload Manual)

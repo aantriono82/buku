@@ -9,7 +9,7 @@ npm install
 npm run dev      # http://localhost:5183, proxy /api ke backend
 ```
 
-Backend harus jalan duluan di port 3011 (lihat `../backend/README` / `.env.example`).
+Backend harus jalan duluan di port 3011, dengan minimal 1 API key provider AI teks terisi di `backend/.env` (lihat `../README.md` dan `../backend/.env.example`).
 
 ## Scripts
 
