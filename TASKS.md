@@ -8,20 +8,20 @@ Konvensi: `[ ]` belum, `[~]` sedang dikerjakan, `[x]` selesai (lint bersih + tes
 
 ## Stage 1 — Scaffold & Database
 
-- [ ] Setup folder `backend/`, `frontend/`, `bot/` sesuai struktur di `planning.md` §8
-- [ ] Init backend Express + TypeScript
-- [ ] Setup `better-sqlite3` + migration runner
-- [ ] Buat migration: tabel `admin`
-- [ ] Buat migration: tabel `buku`
-- [ ] Buat migration: tabel `bab`
-- [ ] Buat migration: tabel `konten_blok`
-- [ ] Buat migration: tabel `export_job`
-- [ ] Setup ESLint + Prettier di `backend/`
-- [ ] Setup Vitest di `backend/`
-- [ ] Endpoint `POST /api/auth/login` + unit test
-- [ ] Endpoint `POST /api/auth/logout` + unit test
-- [ ] Docker Compose dev (backend saja dulu)
-- [ ] Validasi: server jalan, bisa login, migration jalan tanpa error
+- [x] Setup folder `backend/`, `frontend/`, `bot/` sesuai struktur di `planning.md` §8
+- [x] Init backend Express + TypeScript
+- [x] Setup `better-sqlite3` + migration runner
+- [x] Buat migration: tabel `admin`
+- [x] Buat migration: tabel `buku`
+- [x] Buat migration: tabel `bab`
+- [x] Buat migration: tabel `konten_blok`
+- [x] Buat migration: tabel `export_job`
+- [x] Setup ESLint + Prettier di `backend/`
+- [x] Setup Vitest di `backend/`
+- [x] Endpoint `POST /api/auth/login` + unit test
+- [x] Endpoint `POST /api/auth/logout` + unit test
+- [x] Docker Compose dev (backend saja dulu)
+- [x] Validasi: server jalan, bisa login, migration jalan tanpa error
 
 ## Stage 2 — Outline & Bab
 
