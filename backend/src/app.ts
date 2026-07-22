@@ -3,15 +3,24 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import type Database from 'better-sqlite3';
 import { authRoutes } from './routes/auth.js';
+import { bukuRoutes } from './routes/buku.js';
+import { aiProviderRoutes } from './routes/ai-providers.js';
+import { DEFAULT_TEXT_PROVIDER_CREDENTIALS, type TextProviderCredentials } from './services/ai-providers.js';
 import { errorHandler } from './middleware/error-handler.js';
 
 export interface AppOptions {
   db: Database.Database;
   frontendUrl: string;
   isProduction: boolean;
+  credentials?: TextProviderCredentials;
 }
 
-export function createApp({ db, frontendUrl, isProduction }: AppOptions): Express {
+export function createApp({
+  db,
+  frontendUrl,
+  isProduction,
+  credentials = DEFAULT_TEXT_PROVIDER_CREDENTIALS,
+}: AppOptions): Express {
   const app = express();
 
   app.set('trust proxy', 1);
@@ -21,6 +30,8 @@ export function createApp({ db, frontendUrl, isProduction }: AppOptions): Expres
 
   app.get('/api/health', (_req, res) => res.json({ status: 'ok', ts: Date.now() }));
   app.use('/api/auth', authRoutes(db, isProduction));
+  app.use('/api/ai-providers', aiProviderRoutes(credentials));
+  app.use('/api/buku', bukuRoutes({ db, credentials }));
 
   app.use(errorHandler);
 

@@ -25,15 +25,15 @@ Konvensi: `[ ]` belum, `[~]` sedang dikerjakan, `[x]` selesai (lint bersih + tes
 
 ## Stage 2 — Outline & Bab
 
-- [ ] `outlineService`: prompt generate outline dari judul/mapel/jenjang/kurikulum
-- [ ] Unit test `outlineService` (mock call ke OpenRouter/DeepSeek)
-- [ ] Endpoint `POST /api/buku`
-- [ ] Endpoint `POST /api/buku/:id/outline/generate` (SSE)
-- [ ] Endpoint `PUT /api/buku/:id/outline`
-- [ ] Init frontend Vue 3 + Vite, setup ESLint di `frontend/`
-- [ ] Form buat buku (Vue)
-- [ ] Tampilan outline hasil AI + edit sebelum simpan
-- [ ] Validasi: buat buku baru, outline ter-generate & tersimpan ke tabel `bab`
+- [x] `outlineService`: prompt generate outline dari judul/mapel/jenjang/kurikulum
+- [x] Unit test `outlineService` (mock call ke OpenRouter/DeepSeek)
+- [x] Endpoint `POST /api/buku`
+- [x] Endpoint `POST /api/buku/:id/outline/generate` (SSE)
+- [x] Endpoint `PUT /api/buku/:id/outline`
+- [x] Init frontend Vue 3 + Vite, setup ESLint di `frontend/`
+- [x] Form buat buku (Vue)
+- [x] Tampilan outline hasil AI + edit sebelum simpan
+- [x] Validasi: buat buku baru, outline ter-generate & tersimpan ke tabel `bab`
 
 ## Stage 3 — Generate Konten Bab (Teks + Tabel)
 
@@ -111,4 +111,11 @@ Konvensi: `[ ]` belum, `[~]` sedang dikerjakan, `[x]` selesai (lint bersih + tes
 
 ## Task Ad-hoc (di luar 8 stage, isi manual saat muncul)
 
-- [ ]
+- [x] Endpoint `GET /api/buku` (list) dan `GET /api/buku/:id` (detail + bab) — sudah ada di `planning.md` §5,
+      diimplementasikan lebih awal di Stage 2 karena frontend butuh untuk load ulang state buku (bukan improvisasi
+      skema baru, endpoint ini memang sudah direncanakan)
+- [x] Desain ulang AI teks jadi multi-provider (OpenRouter, OpenCode, Google AI, Anthropic, OpenAI, DeepSeek) atas
+      permintaan user setelah Stage 2 awal selesai — `ai-providers.ts` (registry) + `ai-text-client.ts` (unified
+      caller) + endpoint `GET /api/ai-providers` + dropdown provider/model di `OutlineView`. Lihat `planning.md`
+      §5a dan `MEMORY.md` untuk detail keputusan. `outlineService` di-refactor untuk pakai abstraksi ini —
+      `contentService` (Stage 3) tinggal pakai `generateText()` yang sama, tidak perlu desain ulang lagi.

@@ -1,4 +1,6 @@
-export interface AppConfig {
+import type { TextProviderCredentials } from './services/ai-providers.js';
+
+export interface AppConfig extends TextProviderCredentials {
   PORT: number;
   NODE_ENV: string;
   DB_PATH: string;
@@ -15,5 +17,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     ADMIN_USERNAME: env.ADMIN_USERNAME || '',
     ADMIN_PASSWORD: env.ADMIN_PASSWORD || '',
     FRONTEND_URL: env.FRONTEND_URL || 'http://localhost:5183',
+    OPENROUTER_API_KEY: env.OPENROUTER_API_KEY || '',
+    OPENCODE_API_KEY: env.OPENCODE_API_KEY || '',
+    GOOGLE_AI_API_KEY: env.GOOGLE_AI_API_KEY || '',
+    ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY || '',
+    OPENAI_API_KEY: env.OPENAI_API_KEY || '',
+    DEEPSEEK_API_KEY: env.DEEPSEEK_API_KEY || '',
   };
 }

@@ -28,7 +28,7 @@ Bot & Web App untuk menulis buku pelajaran sekolah (teks, tabel, chart, diagram,
 - **Frontend**: Vue 3 + Vite
 - **Bot**: Telegraf (Node.js/TypeScript), project & sesi terpisah dari bot RPP/asesmen
 - **Database**: SQLite (better-sqlite3)
-- **AI Teks**: OpenRouter API (model DeepSeek sebagai default, konsisten dengan project lain)
+- **AI Teks**: multi-provider, admin pilih provider + model per aksi generate (lihat §6a)
 - **AI Gambar**: Gemini 3 Pro Image API (abstraksi provider agar mudah ganti/fallback)
 - **Chart render**: `chartjs-node-canvas` → output PNG
 - **Diagram render**: `@mermaid-js/mermaid-cli` (headless, dijalankan via child_process) → output SVG/PNG
@@ -208,10 +208,12 @@ CREATE TABLE export_job (
 POST   /api/auth/login
 POST   /api/auth/logout
 
+GET    /api/ai-providers                daftar provider AI teks yang sudah dikonfigurasi (API key-nya diisi di server)
+
 POST   /api/buku                        buat buku baru
 GET    /api/buku                        list buku
 GET    /api/buku/:id                    detail buku + bab
-POST   /api/buku/:id/outline/generate   generate outline (SSE)
+POST   /api/buku/:id/outline/generate   generate outline (SSE), body: { provider, model }
 PUT    /api/buku/:id/outline            simpan/edit outline hasil review
 
 POST   /api/bab/:id/generate            generate konten bab (SSE)
@@ -224,6 +226,55 @@ POST   /api/blok/:id/gambar/regenerate  generate ulang gambar AI
 POST   /api/buku/:id/export             mulai export (docx/pdf)
 GET    /api/export/:jobId               cek status export
 GET    /api/export/:jobId/download      download hasil
+```
+
+---
+
+## 5a. AI Teks — Multi-Provider (`ai-providers` + `ai-text-client`)
+
+Berbeda dari rencana awal (OpenRouter/DeepSeek saja), admin bisa pilih provider AI teks per aksi generate
+(outline di Stage 2, konten bab di Stage 3) lewat dropdown di UI. Polanya diambil dari project `rpp-generator`
+milik user yang sudah lebih dulu punya multi-provider AI.
+
+**Provider yang didukung** (`backend/src/services/ai-providers.ts`, registry statis):
+
+| id | Label | Base URL | Env var API key |
+|---|---|---|---|
+| `openrouter` | OpenRouter | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
+| `opencode` | OpenCode Zen | `https://api.opencode.ai/v1` | `OPENCODE_API_KEY` |
+| `google` | Google AI (Gemini, endpoint OpenAI-compatible) | `https://generativelanguage.googleapis.com/v1beta/openai` | `GOOGLE_AI_API_KEY` |
+| `anthropic` | Anthropic | `https://api.anthropic.com` (native Messages API, bukan OpenAI-compatible) | `ANTHROPIC_API_KEY` |
+| `openai` | OpenAI | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
+| `deepseek` | DeepSeek | `https://api.deepseek.com` | `DEEPSEEK_API_KEY` |
+
+**Keputusan desain:**
+- API key **per env var**, bukan disimpan di DB — server operator (admin) yang isi `.env`, tidak butuh
+  enkripsi at-rest / halaman Settings terpisah. Provider yang env var-nya kosong otomatis tidak muncul di
+  `GET /api/ai-providers` (endpoint ini dipakai frontend untuk mengisi dropdown pilihan).
+- Provider **dipilih per aksi generate** (dikirim di body request `{ provider, model }`), bukan disetel sekali
+  secara global — supaya admin bebas bandingkan hasil dari beberapa provider tanpa ganti config server.
+- `ai-text-client.ts` (`generateText()`) adalah satu-satunya tempat yang tahu cara memanggil tiap provider:
+  - Anthropic → jalur native via `@anthropic-ai/sdk` (`client.messages.stream(...)`), format request/response beda
+    dari yang lain (system prompt terpisah, bukan array `messages` dengan role `system`).
+  - 5 provider lainnya → jalur OpenAI-compatible chat completions (streaming SSE manual via `fetch`), model ID
+    di-strip prefix `vendor/` kecuali untuk OpenRouter (yang memang butuh prefix, mis. `deepseek/deepseek-chat`).
+- `outlineService`/`contentService` (Stage 3) tidak tahu detail provider — mereka cuma panggil `generateText()`
+  dengan system+user prompt dan terima teks jadi, lalu parse ke struktur masing-masing.
+
+```typescript
+type TextProviderId = 'openrouter' | 'opencode' | 'google' | 'anthropic' | 'openai' | 'deepseek';
+
+interface TextGenerationRequest {
+  provider: TextProviderId;
+  model: string;
+  apiKey: string;
+  system: string;
+  user: string;
+  onChunk?: (chunk: string) => void;
+  signal?: AbortSignal;
+}
+
+function generateText(req: TextGenerationRequest): Promise<string> { /* streaming, kembalikan teks lengkap */ }
 ```
 
 ---

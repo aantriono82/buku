@@ -12,6 +12,7 @@ const app = createApp({
   db,
   frontendUrl: config.FRONTEND_URL,
   isProduction: config.NODE_ENV === 'production',
+  credentials: config,
 });
 
 app.listen(config.PORT, () => {

@@ -65,7 +65,7 @@ Tidak ada perubahan kode yang dianggap selesai tanpa ini, termasuk perubahan kec
 > Checklist ringkas per stage. Untuk detail task granular & checkbox yang aktif diupdate, lihat `TASKS.md`.
 
 - [x] Stage 1 — Scaffold & Database
-- [ ] Stage 2 — Outline & Bab
+- [x] Stage 2 — Outline & Bab
 - [ ] Stage 3 — Generate Konten Bab (Teks + Tabel)
 - [ ] Stage 4 — Chart & Diagram Rendering
 - [ ] Stage 5 — Gambar (AI + Upload Manual)

@@ -19,6 +19,25 @@ services:
     networks:
       - buku_dev_net
 
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    container_name: buku-frontend-dev
+    restart: unless-stopped
+    environment:
+      BACKEND_URL: "http://backend:3011"
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/index.html:/app/index.html
+      - ./frontend/vite.config.ts:/app/vite.config.ts
+    ports:
+      - "127.0.0.1:5183:5183"
+    networks:
+      - buku_dev_net
+    depends_on:
+      - backend
+
 networks:
   buku_dev_net:
     driver: bridge

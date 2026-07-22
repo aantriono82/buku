@@ -15,6 +15,91 @@ Log keputusan teknis, masalah yang pernah ditemui, dan catatan progres antar ses
 **Dampak**: bagian kode/desain mana yang terpengaruh
 ```
 
+### [2026-07-22] AI teks jadi multi-provider (6 provider), bukan OpenRouter/DeepSeek saja
+**Konteks**: user mencoba login pakai API key Google AI Studio ke fitur outline yang awalnya di-hardcode ke
+OpenRouter saja. Setelah dikonfirmasi, user minta dukungan 6 provider sekaligus (OpenRouter, OpenCode Zen, Google
+AI, Anthropic, OpenAI, DeepSeek) yang bisa dipilih user per aksi generate — bukan cuma satu provider tetap.
+**Keputusan/temuan**:
+- Base URL & cara deteksi tiap provider disalin dari pola yang sudah terbukti jalan di project lain milik user
+  (`~/Dev/rpp/backend/src/utils/apiBaseUrl.js` dan `~/Dev/rpp/frontend/src/utils/aiProviders.js`) supaya konsisten
+  dan tidak menebak-nebak endpoint sendiri. Model default per provider juga diambil dari
+  `~/Dev/rpp/backend/src/db/migrations.js` (seed `ai_models`), kecuali OpenCode Zen yang tidak ada di seed itu —
+  dibiarkan tanpa default (user isi model manual), jangan menebak nama model OpenCode tanpa sumber.
+- API key **per env var** (`OPENROUTER_API_KEY`, `OPENCODE_API_KEY`, `GOOGLE_AI_API_KEY`, `ANTHROPIC_API_KEY`,
+  `OPENAI_API_KEY`, `DEEPSEEK_API_KEY`), bukan tabel DB baru — sengaja dibuat sesederhana mungkin (single admin =
+  operator server, tidak perlu enkripsi at-rest / halaman Settings terpisah seperti pola multi-user di
+  `rpp-generator`). Provider yang env var-nya kosong otomatis hilang dari pilihan di UI
+  (`GET /api/ai-providers`), dicek lewat `listAvailableTextProviders()`.
+- Provider **dipilih per aksi generate** (dropdown di `OutlineView`, dikirim di body `{ provider, model }`), bukan
+  disetel sekali secara global.
+- Arsitektur: `ai-providers.ts` (registry statis + resolve api key, pure function, gampang ditest) dipisah dari
+  `ai-text-client.ts` (`generateText()` — satu-satunya tempat yang tahu cara memanggil tiap provider: native
+  Anthropic via `@anthropic-ai/sdk` streaming vs 5 provider lain lewat jalur OpenAI-compatible `fetch` streaming
+  manual). `outlineService.generateOutline()` sekarang cuma manggil `generateText()` dengan system+user prompt,
+  tidak tahu detail provider sama sekali — jadi `contentService` (Stage 3) tinggal reuse tanpa desain ulang.
+- **Bug yang ketemu & diperbaiki saat proses ini**: endpoint SSE (`POST /:id/outline/generate`) awalnya treat
+  SETIAP event `req.on('close')` sebagai client disconnect asli, lalu `abortController.abort()`. Begitu endpoint
+  ini mulai menerima JSON body (`{provider, model}` — sebelumnya endpoint ini dipanggil tanpa body), muncul
+  fenomena **half-close**: `close` terpicu begitu client selesai kirim body request, jauh sebelum response
+  selesai — persis masalah yang sudah didokumentasikan di komentar
+  `~/Dev/rpp/backend/src/controllers/generateController.js`. Akibatnya event `done`/`error` tidak pernah terkirim
+  ke client (test SSE gagal, res.text kosong). Fix: hanya anggap disconnect asli kalau `req.socket.destroyed`
+  true, bukan sekadar event `close`. **Pola ini WAJIB dipakai lagi di Stage 3** (`POST /api/bab/:id/generate`)
+  karena endpoint itu juga SSE + kemungkinan besar butuh body (provider/model per bab).
+**Dampak**: `planning.md` §5a (baru), `backend/src/services/ai-providers.ts`, `ai-text-client.ts`,
+`outline-service.ts` (refactor), `routes/buku.ts`, `routes/ai-providers.ts` (baru), `config.ts` (6 env var baru,
+`OPENROUTER_MODEL` dihapus — default model sekarang per-provider di registry), `frontend/src/views/OutlineView.vue`
+(dropdown provider+model). Dependency baru: `@anthropic-ai/sdk`.
+
+### [2026-07-22] Stage 2 selesai — outline via SSE, pola diambil dari `rpp-generator`
+**Konteks**: implementasi `outlineService` + endpoint outline + frontend Vue pertama kalinya di project ini. Sempat
+cek pola yang sudah terbukti jalan di `~/Dev/rpp/backend/src/controllers/generateController.js` dan
+`~/Dev/rpp/frontend/src/views/GenerateView.vue` untuk SSE streaming dari OpenRouter.
+**Keputusan/temuan**:
+- Endpoint SSE (`POST /api/buku/:id/outline/generate`) pakai `res.write('data: ...\n\n')` manual, bukan
+  `EventSource` di frontend karena `EventSource` browser hanya mendukung GET — client pakai `fetch()` +
+  `res.body.getReader()`, pola yang sama dipakai `rpp-generator`. Pola ini akan dipakai lagi di Stage 3 untuk
+  generate konten bab.
+- `outlineService.generateOutline()` selalu minta `stream: true` ke OpenRouter dan meneruskan tiap delta chunk via
+  callback `onChunk`, lalu di akhir stream baru di-parse jadi JSON `{bab: [{judul, ringkasan}]}`
+  (`response_format: json_object`). Parsing dipisah jadi `parseOutlineResponse()` yang testable tanpa mock network.
+- Model default OpenRouter: `deepseek/deepseek-chat` (env `OPENROUTER_MODEL`, override per `OPENROUTER_API_KEY`).
+- `PUT /api/buku/:id/outline` pakai strategi **replace-all**: hapus semua baris `bab` milik buku itu lalu insert
+  ulang sesuai urutan array yang dikirim frontend. Ini disengaja karena tahap ini masih fase "review outline
+  sebelum generate konten" — belum ada `konten_blok` yang bisa kehilangan referensi kalau bab dihapus/ditata ulang.
+  **Kalau nanti PUT outline dipanggil setelah sebagian bab sudah punya `konten_blok` (generate ulang outline di
+  tengah jalan), strategi ini perlu direvisi** supaya tidak menghapus konten bab yang sudah digenerate.
+- Endpoint `GET /api/buku` dan `GET /api/buku/:id` (sudah ada di `planning.md` §5, bukan endpoint baru) turut
+  diimplementasikan di Stage 2 karena frontend butuh reload state buku — dicatat di `TASKS.md` bagian ad-hoc.
+
+### [2026-07-22] Frontend discaffold manual (Vue 3 + Vite + TS), ESLint flat config disamakan dengan backend
+**Konteks**: `frontend/` masih kosong di awal Stage 2, perlu discaffold dari nol.
+**Keputusan/temuan**: pakai `npm create vite@latest -- --template vue-ts`, lalu ganti ESLint ke flat config
+(`eslint.config.js`) dengan `typescript-eslint` + `eslint-plugin-vue` + `eslint-config-prettier`, gaya sama persis
+dengan `backend/eslint.config.js` (aturan `eqeqeq`, `curly`, `no-console` warn, dst). Prettier config
+(`.prettierrc.json`) disamakan (`printWidth: 120`, single quote). Vitest dipasang tapi baru dipakai untuk logic
+murni tanpa DOM (`src/lib/sse.ts` — parsing baris SSE `data: ...`), belum ada test komponen Vue (`@vue/test-utils`)
+karena belum ada logika non-trivial di level komponen; tambahkan kalau muncul di stage berikutnya.
+**Dampak**: `frontend/vite.config.ts` dev server di port **5183**, proxy `/api` ke `process.env.BACKEND_URL` dengan
+fallback `http://localhost:3011` (mengikuti pola `rpp-generator`: env var untuk docker service name, fallback
+localhost untuk dev di luar docker). `docker-compose.dev.yml` menambah service `frontend` dengan
+`BACKEND_URL=http://backend:3011` (nama service Docker, sesuai konvensi `CLAUDE.md`).
+
+### [2026-07-22] Verifikasi UI dengan browser headless gagal — jaringan sandbox tidak bisa download Chromium
+**Konteks**: coba ikuti aturan "start dev server dan tes fitur di browser sebelum lapor selesai" untuk Stage 2
+pakai skill `run` (pola `chromium-cli` / Playwright headless).
+**Keputusan/temuan**: `chromium-cli` tidak tersedia di environment ini. Playwright npm package ada di project lain
+(`~/Dev/atigacbt/frontend`) tapi versi browser binary-nya tidak cocok dengan yang sudah ter-cache
+(`chromium_headless_shell-1217` vs `chromium-1228`), dan `npx playwright install chromium` macet di 0% setelah
+60+ detik — jaringan sandbox tampaknya memblokir/throttle download binary besar dari `cdn.playwright.dev`. Sebagai
+gantinya, alur end-to-end diverifikasi lewat `curl` melalui proxy Vite (`http://localhost:5183/api/...`, sama
+seperti yang akan dipanggil browser): login → buat buku → generate outline (500 karena `OPENROUTER_API_KEY` kosong,
+sesuai ekspektasi) → simpan outline manual → reload detail buku, semua sesuai ekspektasi. **Render visual di
+browser sungguhan (layout, console error di DOM) belum tervalidasi** — kalau sesi berikutnya butuh screenshot,
+jangan ulangi percobaan `playwright install`, kemungkinan besar akan macet lagi di jaringan yang sama.
+**Dampak**: proses validasi Stage 2 mengandalkan test otomatis (unit+integration via supertest) + smoke test API
+manual, bukan screenshot browser.
+
 ### [2026-07-22] Port backend diubah dari 3001
 **Konteks**: port 3001 (default awal Stage 1) sudah dipakai `rppgen-backend-dev` di VPS yang sama.
 **Keputusan/temuan**: backend `buku-generator` pakai port **3011**, frontend dev pakai port **5183**. Selalu via `process.env.PORT`, jangan hardcode.
@@ -76,3 +161,8 @@ _(kosong — isi saat menemukan masalah non-trivial selama development, misalnya
 - Ukuran final Docker image backend setelah LibreOffice + Chromium (mermaid-cli) ditambahkan — apakah perlu dipisah jadi service tersendiri
 - Estimasi waktu generate 1 bab penuh untuk kalibrasi timeout SSE
 - Prompt engineering untuk menentukan kapan materi "layak" divisualisasikan sebagai chart/diagram vs cukup teks
+- Jalur `generateText()` untuk OpenCode Zen, Google AI, Anthropic, OpenAI, DeepSeek belum pernah dites ke API
+  aslinya (cuma OpenRouter yang di-smoke-test dengan key palsu dan benar-benar hit endpoint asli, error 401
+  balik dengan benar). Base URL & format request disalin dari `rpp-generator` yang sudah terbukti jalan di sana,
+  tapi kalau ada provider yang gagal aneh (bukan sekadar 401 auth), cek dulu apakah `response_format: json_object`
+  didukung provider itu (`jsonMode` bisa di-set false di `generateText()` request kalau ternyata tidak didukung)
