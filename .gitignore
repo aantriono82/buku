@@ -1,0 +1,23 @@
+# Env
+.env
+.env.dev
+.env.local
+
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+coverage/
+
+# SQLite data & uploads (persist via Docker volume, bukan git)
+backend/data/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.zed/
+*.swp

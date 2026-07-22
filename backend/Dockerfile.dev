@@ -1,0 +1,15 @@
+FROM node:22-alpine
+
+# better-sqlite3 perlu build tools untuk kompilasi native module
+RUN apk add --no-cache python3 make g++
+
+WORKDIR /app
+
+COPY package.json package-lock.json* ./
+RUN npm install
+
+RUN mkdir -p data
+
+EXPOSE 3011
+
+CMD ["npx", "tsx", "watch", "--env-file=.env", "src/index.ts"]
