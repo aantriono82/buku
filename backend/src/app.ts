@@ -4,6 +4,7 @@ import cookieParser from 'cookie-parser';
 import type Database from 'better-sqlite3';
 import { authRoutes } from './routes/auth.js';
 import { bukuRoutes } from './routes/buku.js';
+import { babRoutes } from './routes/bab.js';
 import { aiProviderRoutes } from './routes/ai-providers.js';
 import { DEFAULT_TEXT_PROVIDER_CREDENTIALS, type TextProviderCredentials } from './services/ai-providers.js';
 import { errorHandler } from './middleware/error-handler.js';
@@ -32,6 +33,7 @@ export function createApp({
   app.use('/api/auth', authRoutes(db, isProduction));
   app.use('/api/ai-providers', aiProviderRoutes(credentials));
   app.use('/api/buku', bukuRoutes({ db, credentials }));
+  app.use('/api/bab', babRoutes({ db, credentials }));
 
   app.use(errorHandler);
 

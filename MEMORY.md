@@ -15,6 +15,50 @@ Log keputusan teknis, masalah yang pernah ditemui, dan catatan progres antar ses
 **Dampak**: bagian kode/desain mana yang terpengaruh
 ```
 
+### [2026-07-23] Stage 3 selesai — contentService, `POST /api/bab/:id/generate`, halaman detail bab
+**Konteks**: implementasi generate konten bab (teks + tabel) mengikuti pola yang sudah terbukti di Stage 2
+(`outlineService` + SSE + multi-provider `generateText()`), termasuk fix half-close SSE yang sudah didokumentasikan.
+**Keputusan/temuan**:
+- "Stream per blok" tidak berarti AI mengirim tiap blok sebagai completion terpisah — `generateText()` (dan API
+  provider manapun) hanya bisa stream *token/delta teks mentah* dari satu completion JSON utuh (sama seperti
+  outline). Jadi `contentService.generateContent()` tetap minta satu respons JSON penuh (`{"blok": [...]}`),
+  di-stream sebagai `chunk` event mentah untuk indikator "sedang menulis" (sama seperti outline), lalu setelah
+  parse selesai, endpoint mengirim tiap blok hasil parse sebagai event SSE `blok` terpisah **satu per satu secara
+  berurutan** (bukan sekaligus), baru diikuti event `done`. Ini yang membuat frontend terlihat "live streaming per
+  blok" meski secara teknis AI-nya tidak benar-benar stream terstruktur. Kalau nanti butuh streaming JSON
+  incremental yang sesungguhnya (parse partial JSON saat masih di-generate), itu perubahan besar di
+  `ai-text-client.ts` — belum diperlukan untuk Stage 3.
+- Prompt `contentService` **sengaja dibatasi hanya tipe `teks` dan `tabel`** (system prompt eksplisit menyebut
+  "Tipe blok yang boleh dipakai hanya teks dan tabel") — sesuai `AGENT_PROMPT.md` Stage 3 yang bilang chart/diagram
+  "menyusul di stage berikutnya". Prompt akan di-extend di Stage 4 untuk chart/diagram, bukan didesain ulang.
+- `maxTokens` untuk `generateContent()` di-set 8000 (vs default 4000 di `generateText()`/outline) karena isi satu
+  bab jauh lebih panjang dari sekadar daftar judul+ringkasan outline. Belum dikalibrasi dengan generate asli ke
+  provider sungguhan (lihat "Hal yang Masih Perlu Divalidasi").
+- `POST /api/bab/:id/generate` **replace-all** konten lama tiap kali digenerate ulang (delete semua `konten_blok`
+  milik bab itu dalam transaksi, lalu insert ulang) — konsisten dengan strategi `PUT /api/buku/:id/outline` di
+  Stage 2. Belum ada mekanisme "regenerate blok tertentu saja" — kalau guru cuma mau perbaiki satu blok, itu
+  butuh endpoint `PUT /api/bab/:id/blok/:blokId` (sudah ada di `planning.md` §5, belum diimplementasikan, dicatat
+  di `TASKS.md` ad-hoc).
+- Field `bab.status` diupdate di 3 titik sesuai instruksi `CLAUDE.md`: `generating` di awal request (sebelum
+  panggil AI), `selesai` setelah blok berhasil disimpan ke DB, `error` di catch block (termasuk saat abort akibat
+  client disconnect asli).
+- `GET /api/bab/:id` (detail bab + blok, `data_json` di-parse jadi objek) diimplementasikan lebih awal sebagai
+  ad-hoc task, bukan cuma endpoint generate — dibutuhkan halaman `BabView.vue` untuk load ulang state saat
+  pertama dibuka/refresh, pola sama seperti `GET /api/buku/:id` di Stage 2.
+- Frontend `BabView.vue` mengikuti pola `OutlineView.vue` persis: `fetch()` manual + `reader.getReader()` (bukan
+  `EventSource`, karena butuh POST dengan body), parsing pakai `extractSseDataLines()` yang sudah ada. Blok teks
+  dirender sebagai `<div>` `white-space: pre-wrap` (belum ada markdown renderer library — `data.markdown` masih
+  ditampilkan sebagai teks mentah, bukan di-render jadi HTML; kalau butuh rendering markdown asli, itu keputusan
+  terpisah, cek dulu ke user sebelum tambah dependency markdown parser). Blok tabel dirender sebagai `<table>`
+  HTML biasa.
+**Dampak**: file baru `backend/src/services/content-service.ts`, `backend/src/routes/bab.ts`,
+`frontend/src/views/BabView.vue`; `app.ts` (mount `/api/bab`), `router/index.ts` (route `/bab/:id`),
+`OutlineView.vue` (daftar bab tersimpan dengan link ke halaman detail). Test: 85 test backend lulus (13 baru untuk
+`content-service`, 9 baru untuk `bab` routes), typecheck (`vue-tsc -b`) dan lint frontend+backend bersih. Validasi
+end-to-end dilakukan lewat `curl` ke dev server (login → buat buku → simpan outline → `GET /api/bab/:id` blok
+kosong → `POST /api/bab/:id/generate` tanpa provider/key kosong → 400 sesuai ekspektasi, sama seperti pola
+validasi Stage 2 karena tidak ada API key text provider asli yang dikonfigurasi di sandbox ini).
+
 ### [2026-07-22] AI teks jadi multi-provider (6 provider), bukan OpenRouter/DeepSeek saja
 **Konteks**: user mencoba login pakai API key Google AI Studio ke fitur outline yang awalnya di-hardcode ke
 OpenRouter saja. Setelah dikonfirmasi, user minta dukungan 6 provider sekaligus (OpenRouter, OpenCode Zen, Google
@@ -166,3 +210,8 @@ _(kosong — isi saat menemukan masalah non-trivial selama development, misalnya
   balik dengan benar). Base URL & format request disalin dari `rpp-generator` yang sudah terbukti jalan di sana,
   tapi kalau ada provider yang gagal aneh (bukan sekadar 401 auth), cek dulu apakah `response_format: json_object`
   didukung provider itu (`jsonMode` bisa di-set false di `generateText()` request kalau ternyata tidak didukung)
+- `maxTokens: 8000` di `contentService.generateContent()` (Stage 3) masih tebakan, belum dites ke provider asli —
+  kalau bab dengan banyak sub-materi/tabel ternyata butuh lebih dari itu, respons JSON bisa terpotong di tengah
+  dan gagal parse (`parseContentResponse` akan throw "bukan JSON yang valid"). Kalau ini kejadian di pemakaian
+  nyata, pertimbangkan naikkan `maxTokens` atau ubah strategi jadi multi-turn (generate per-bagian bab, bukan satu
+  completion untuk seluruh bab) — belum diimplementasikan.

@@ -4,27 +4,30 @@ import { useRoute } from 'vue-router';
 import { API_BASE, api, ApiError } from '../lib/api';
 import { extractSseDataLines } from '../lib/sse';
 
-interface BabItem {
-  judul: string;
-  ringkasan: string;
+interface BlokTeksData {
+  markdown: string;
 }
 
-interface BabRow {
+interface BlokTabelData {
+  headers: string[];
+  rows: string[][];
+}
+
+interface BlokItem {
   id: number;
+  urutan: number;
+  tipe: 'teks' | 'tabel';
+  data: BlokTeksData | BlokTabelData;
+}
+
+interface BabDetail {
+  id: number;
+  buku_id: number;
   urutan: number;
   judul: string;
   ringkasan: string | null;
   status: string;
-}
-
-interface BukuDetail {
-  id: number;
-  judul: string;
-  mapel: string;
-  jenjang: string;
-  kurikulum: string | null;
-  status: string;
-  bab: BabRow[];
+  blok: BlokItem[];
 }
 
 interface AiProvider {
@@ -34,9 +37,9 @@ interface AiProvider {
 }
 
 const route = useRoute();
-const bukuId = Number(route.params.id);
+const babId = Number(route.params.id);
 
-const buku = ref<BukuDetail | null>(null);
+const bab = ref<BabDetail | null>(null);
 const loadError = ref('');
 
 const providers = ref<AiProvider[]>([]);
@@ -47,22 +50,18 @@ const selectedModel = ref('');
 const streaming = ref(false);
 const streamText = ref('');
 const generateError = ref('');
+const liveBlok = ref<BlokItem[]>([]);
 
-const babDraft = ref<BabItem[]>([]);
+function isTabelData(data: BlokTeksData | BlokTabelData): data is BlokTabelData {
+  return 'headers' in data;
+}
 
-const saving = ref(false);
-const saveError = ref('');
-const saveSuccess = ref(false);
-
-async function loadBuku(): Promise<void> {
+async function loadBab(): Promise<void> {
   loadError.value = '';
   try {
-    buku.value = await api.get<BukuDetail>(`/buku/${bukuId}`);
-    if (buku.value.bab.length) {
-      babDraft.value = buku.value.bab.map((b) => ({ judul: b.judul, ringkasan: b.ringkasan || '' }));
-    }
+    bab.value = await api.get<BabDetail>(`/bab/${babId}`);
   } catch (err) {
-    loadError.value = err instanceof ApiError ? err.message : 'Gagal memuat buku.';
+    loadError.value = err instanceof ApiError ? err.message : 'Gagal memuat bab.';
   }
 }
 
@@ -87,11 +86,11 @@ function handleProviderChange(): void {
 async function handleGenerate(): Promise<void> {
   generateError.value = '';
   streamText.value = '';
+  liveBlok.value = [];
   streaming.value = true;
-  saveSuccess.value = false;
 
   try {
-    const res = await fetch(`${API_BASE}/buku/${bukuId}/outline/generate`, {
+    const res = await fetch(`${API_BASE}/bab/${babId}/generate`, {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
@@ -119,89 +118,55 @@ async function handleGenerate(): Promise<void> {
 
       for (const event of events) {
         try {
-          const parsed = JSON.parse(event) as { chunk?: string; done?: boolean; bab?: BabItem[]; error?: string };
+          const parsed = JSON.parse(event) as {
+            chunk?: string;
+            blok?: BlokItem;
+            done?: boolean;
+            error?: string;
+          };
           if (parsed.chunk) {
             streamText.value += parsed.chunk;
           }
+          if (parsed.blok) {
+            liveBlok.value.push(parsed.blok);
+          }
           if (parsed.error) {
             generateError.value = parsed.error;
-          }
-          if (parsed.done && parsed.bab) {
-            babDraft.value = parsed.bab.map((b) => ({ judul: b.judul, ringkasan: b.ringkasan }));
           }
         } catch {
           // lewati event yang belum lengkap/tidak valid
         }
       }
     }
+
+    await loadBab();
   } catch (err) {
-    generateError.value = err instanceof Error ? err.message : 'Gagal generate outline.';
+    generateError.value = err instanceof Error ? err.message : 'Gagal generate konten bab.';
+    await loadBab();
   } finally {
     streaming.value = false;
   }
 }
 
-function addBab(): void {
-  babDraft.value.push({ judul: '', ringkasan: '' });
-}
-
-function removeBab(index: number): void {
-  babDraft.value.splice(index, 1);
-}
-
-async function handleSave(): Promise<void> {
-  saveError.value = '';
-  saveSuccess.value = false;
-
-  if (!babDraft.value.length || babDraft.value.some((b) => !b.judul.trim())) {
-    saveError.value = 'Setiap bab wajib punya judul, minimal 1 bab.';
-    return;
-  }
-
-  saving.value = true;
-  try {
-    await api.put(`/buku/${bukuId}/outline`, { bab: babDraft.value });
-    saveSuccess.value = true;
-    await loadBuku();
-  } catch (err) {
-    saveError.value = err instanceof ApiError ? err.message : 'Gagal menyimpan outline.';
-  } finally {
-    saving.value = false;
-  }
-}
-
 onMounted(() => {
-  loadBuku();
+  loadBab();
   loadProviders();
 });
 </script>
 
 <template>
   <div v-if="loadError" class="error">{{ loadError }}</div>
-  <div v-else-if="buku">
-    <h1>{{ buku.judul }}</h1>
-    <p class="meta">
-      {{ buku.mapel }} · {{ buku.jenjang }}
-      <span v-if="buku.kurikulum">· {{ buku.kurikulum }}</span>
-    </p>
-    <p class="meta">Status: {{ buku.status }}</p>
-
-    <section v-if="buku.bab.length">
-      <h2>Bab Tersimpan</h2>
-      <ul class="bab-list">
-        <li v-for="b in buku.bab" :key="b.id">
-          <RouterLink :to="`/bab/${b.id}`">{{ b.urutan }}. {{ b.judul }}</RouterLink>
-          — status: {{ b.status }}
-        </li>
-      </ul>
-    </section>
+  <div v-else-if="bab">
+    <RouterLink :to="`/buku/${bab.buku_id}/outline`">&larr; Kembali ke outline</RouterLink>
+    <h1>{{ bab.judul }}</h1>
+    <p v-if="bab.ringkasan" class="meta">{{ bab.ringkasan }}</p>
+    <p class="meta">Status: {{ bab.status }}</p>
 
     <section>
       <p v-if="providersError" class="error">{{ providersError }}</p>
       <p v-else-if="!providers.length" class="hint">
         Belum ada provider AI teks yang dikonfigurasi di server. Isi salah satu API key di
-        <code>backend/.env</code> (mis. <code>OPENROUTER_API_KEY</code>, <code>GOOGLE_AI_API_KEY</code>) lalu restart
-        backend.
+        <code>backend/.env</code> lalu restart backend.
       </p>
       <div v-else class="provider-picker">
         <label>
@@ -217,33 +182,52 @@ onMounted(() => {
       </div>
 
       <button type="button" :disabled="streaming || !selectedProvider" @click="handleGenerate">
-        {{ streaming ? 'Menyusun outline...' : 'Generate Outline dengan AI' }}
+        {{
+          streaming ? 'Menulis konten bab...' : bab.blok.length ? 'Generate Ulang Konten Bab' : 'Generate Konten Bab'
+        }}
       </button>
       <p v-if="generateError" class="error">{{ generateError }}</p>
-      <pre v-if="streaming || streamText" class="stream-preview">{{ streamText }}</pre>
+      <pre v-if="streaming && streamText" class="stream-preview">{{ streamText }}</pre>
     </section>
 
-    <section v-if="babDraft.length">
-      <h2>Outline Bab (bisa diedit sebelum disimpan)</h2>
-      <div v-for="(b, idx) in babDraft" :key="idx" class="bab-row">
-        <label>
-          Judul Bab {{ idx + 1 }}
-          <input v-model="b.judul" type="text" required />
-        </label>
-        <label>
-          Ringkasan
-          <textarea v-model="b.ringkasan" rows="2"></textarea>
-        </label>
-        <button type="button" class="link-button" @click="removeBab(idx)">Hapus bab ini</button>
+    <section v-if="streaming || liveBlok.length">
+      <h2>Blok yang sedang dihasilkan</h2>
+      <div v-for="b in liveBlok" :key="`live-${b.id}`" class="blok">
+        <div v-if="b.tipe === 'teks'" class="blok-teks">{{ (b.data as BlokTeksData).markdown }}</div>
+        <table v-else-if="isTabelData(b.data)" class="blok-tabel">
+          <thead>
+            <tr>
+              <th v-for="(h, i) in (b.data as BlokTabelData).headers" :key="i">{{ h }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(row, ri) in (b.data as BlokTabelData).rows" :key="ri">
+              <td v-for="(cell, ci) in row" :key="ci">{{ cell }}</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
-      <button type="button" class="secondary" @click="addBab">+ Tambah Bab</button>
-
-      <p v-if="saveError" class="error">{{ saveError }}</p>
-      <p v-if="saveSuccess" class="success">Outline tersimpan.</p>
-      <button type="button" :disabled="saving" @click="handleSave">
-        {{ saving ? 'Menyimpan...' : 'Simpan Outline' }}
-      </button>
     </section>
+
+    <section v-else-if="bab.blok.length">
+      <h2>Konten Bab Tersimpan</h2>
+      <div v-for="b in bab.blok" :key="b.id" class="blok">
+        <div v-if="b.tipe === 'teks'" class="blok-teks">{{ (b.data as BlokTeksData).markdown }}</div>
+        <table v-else-if="isTabelData(b.data)" class="blok-tabel">
+          <thead>
+            <tr>
+              <th v-for="(h, i) in (b.data as BlokTabelData).headers" :key="i">{{ h }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(row, ri) in (b.data as BlokTabelData).rows" :key="ri">
+              <td v-for="(cell, ci) in row" :key="ci">{{ cell }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+    <p v-else class="hint">Bab ini belum punya konten. Klik "Generate Konten Bab" untuk mulai.</p>
   </div>
 </template>
 
@@ -283,16 +267,6 @@ onMounted(() => {
   font-size: 13px;
 }
 
-.bab-row {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 12px;
-  margin: 12px 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
 label {
   display: flex;
   flex-direction: column;
@@ -301,7 +275,6 @@ label {
 }
 
 input,
-textarea,
 select {
   padding: 8px;
   border: 1px solid var(--border);
@@ -324,36 +297,33 @@ button:disabled {
   cursor: not-allowed;
 }
 
-button.secondary {
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--text-h);
-}
-
-button.link-button {
-  background: none;
-  color: #d33;
-  padding: 0;
-  align-self: flex-start;
-  margin-top: 0;
-}
-
 .error {
   color: #d33;
   font-size: 14px;
 }
 
-.success {
-  color: #2a8;
-  font-size: 14px;
+.blok {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  margin: 12px 0;
 }
 
-.bab-list {
-  list-style: none;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+.blok-teks {
+  white-space: pre-wrap;
+  line-height: 1.6;
+}
+
+.blok-tabel {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.blok-tabel th,
+.blok-tabel td {
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  text-align: left;
   font-size: 14px;
 }
 </style>

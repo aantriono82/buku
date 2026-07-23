@@ -37,13 +37,13 @@ Konvensi: `[ ]` belum, `[~]` sedang dikerjakan, `[x]` selesai (lint bersih + tes
 
 ## Stage 3 — Generate Konten Bab (Teks + Tabel)
 
-- [ ] Desain prompt output JSON terstruktur per blok (teks & tabel)
-- [ ] `contentService`: generate konten 1 bab, stream per blok
-- [ ] Unit test `contentService` (mock AI response, cek parsing blok benar)
-- [ ] Endpoint `POST /api/bab/:id/generate` (SSE)
-- [ ] Simpan blok ke `konten_blok` sesuai urutan
-- [ ] Halaman detail bab (Vue) — tampilkan blok live saat streaming
-- [ ] Validasi: generate 1 bab penuh, urutan blok benar
+- [x] Desain prompt output JSON terstruktur per blok (teks & tabel)
+- [x] `contentService`: generate konten 1 bab, stream per blok
+- [x] Unit test `contentService` (mock AI response, cek parsing blok benar)
+- [x] Endpoint `POST /api/bab/:id/generate` (SSE)
+- [x] Simpan blok ke `konten_blok` sesuai urutan
+- [x] Halaman detail bab (Vue) — tampilkan blok live saat streaming
+- [x] Validasi: generate 1 bab penuh, urutan blok benar
 
 ## Stage 4 — Chart & Diagram Rendering
 
@@ -119,3 +119,9 @@ Konvensi: `[ ]` belum, `[~]` sedang dikerjakan, `[x]` selesai (lint bersih + tes
       caller) + endpoint `GET /api/ai-providers` + dropdown provider/model di `OutlineView`. Lihat `planning.md`
       §5a dan `MEMORY.md` untuk detail keputusan. `outlineService` di-refactor untuk pakai abstraksi ini —
       `contentService` (Stage 3) tinggal pakai `generateText()` yang sama, tidak perlu desain ulang lagi.
+- [x] Endpoint `GET /api/bab/:id` (detail bab + blok) — sudah ada di `planning.md` §5, diimplementasikan lebih
+      awal di Stage 3 (bukan cuma `POST /api/bab/:id/generate` yang tercantum di `AGENT_PROMPT.md`) karena
+      halaman detail bab (Vue) butuh reload state blok saat pertama dibuka/refresh, pola sama seperti
+      `GET /api/buku`/`GET /api/buku/:id` di Stage 2. `PUT /api/bab/:id/blok/:blokId` (edit manual satu blok)
+      belum diimplementasikan — bukan bagian kriteria validasi Stage 3, ditunda ke stage yang butuh (mis. saat
+      guru perlu koreksi manual sebelum export).
