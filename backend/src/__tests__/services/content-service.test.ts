@@ -25,6 +25,7 @@ describe('buildContentPrompt', () => {
     expect(system).toContain('tabel');
     expect(system).toContain('chart');
     expect(system).toContain('diagram');
+    expect(system).toContain('gambar');
     expect(user).toContain('Matematika Dasar');
     expect(user).toContain('SD Kelas 4');
     expect(user).toContain('Kurikulum Merdeka');
@@ -153,6 +154,32 @@ describe('parseContentResponse', () => {
   it('melempar error kalau blok diagram tidak punya mermaid_syntax yang valid', () => {
     const raw = JSON.stringify({ blok: [{ tipe: 'diagram', data: { mermaid_syntax: '   ' } }] });
     expect(() => parseContentResponse(raw)).toThrow('bertipe diagram tidak punya mermaid_syntax yang valid');
+  });
+
+  it('parse blok gambar source ai yang valid', () => {
+    const raw = JSON.stringify({
+      blok: [{ tipe: 'gambar', data: { source: 'ai', prompt: 'ilustrasi daur air', caption: 'Daur air' } }],
+    });
+    expect(parseContentResponse(raw)).toEqual([
+      { tipe: 'gambar', data: { source: 'ai', prompt: 'ilustrasi daur air', caption: 'Daur air' } },
+    ]);
+  });
+
+  it('parse blok gambar source upload tanpa prompt', () => {
+    const raw = JSON.stringify({ blok: [{ tipe: 'gambar', data: { source: 'upload', caption: 'Foto guru' } }] });
+    expect(parseContentResponse(raw)).toEqual([
+      { tipe: 'gambar', data: { source: 'upload', prompt: undefined, caption: 'Foto guru' } },
+    ]);
+  });
+
+  it('melempar error kalau blok gambar tidak punya source yang valid', () => {
+    const raw = JSON.stringify({ blok: [{ tipe: 'gambar', data: { prompt: 'x' } }] });
+    expect(() => parseContentResponse(raw)).toThrow('tidak punya source ("ai"/"upload") yang valid');
+  });
+
+  it('melempar error kalau blok gambar source ai tidak punya prompt', () => {
+    const raw = JSON.stringify({ blok: [{ tipe: 'gambar', data: { source: 'ai' } }] });
+    expect(() => parseContentResponse(raw)).toThrow('wajib punya prompt');
   });
 });
 

@@ -2,9 +2,10 @@ import path from 'path';
 import { Router, type Response } from 'express';
 import type Database from 'better-sqlite3';
 import { requireAuth } from '../middleware/require-auth.js';
-import { generateContent, type ContentBlok } from '../services/content-service.js';
+import { generateContent, type ContentBlok, type GambarData } from '../services/content-service.js';
 import { renderChart, type ChartData } from '../services/chart-render-service.js';
 import { renderDiagram, type DiagramData } from '../services/diagram-render-service.js';
+import { generateAI, type ImageProvider } from '../services/image-service.js';
 import {
   TEXT_PROVIDERS,
   isTextProviderId,
@@ -44,6 +45,7 @@ export interface BabRoutesOptions {
   db: Database.Database;
   credentials: TextProviderCredentials;
   storageDir: string;
+  imageProvider?: ImageProvider;
 }
 
 interface SavedBlok {
@@ -55,16 +57,45 @@ interface SavedBlok {
 }
 
 /**
- * Render blok chart/diagram jadi PNG/SVG dan simpan file_path ke DB. Kegagalan render satu blok tidak
- * menggagalkan seluruh generate bab (teks/tabel tetap valid) — cukup dicatat ke stderr, file_path tetap null.
+ * Konversi file_path di disk (chart/diagram/gambar) jadi URL yang bisa diakses browser lewat static
+ * mount /api/storage (lihat app.ts). Mengembalikan null kalau file_path di luar storageDir atau kosong.
  */
-async function renderVisualBlok(db: Database.Database, storageDir: string, blok: SavedBlok): Promise<void> {
+export function toFileUrl(storageDir: string, filePath: string | null | undefined): string | null {
+  if (!filePath) {
+    return null;
+  }
+  const rel = path.relative(path.resolve(storageDir), path.resolve(filePath));
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    return null;
+  }
+  return `/api/storage/${rel.split(path.sep).join('/')}`;
+}
+
+/**
+ * Render blok chart/diagram/gambar(AI) jadi file dan simpan file_path ke DB. Kegagalan render satu blok tidak
+ * menggagalkan seluruh generate bab (teks/tabel tetap valid) — cukup dicatat ke stderr, file_path tetap null.
+ * Blok gambar dengan source "upload" sengaja dilewati di sini — menunggu guru upload manual lewat
+ * POST /api/blok/:id/gambar/upload.
+ */
+async function renderVisualBlok(
+  db: Database.Database,
+  storageDir: string,
+  blok: SavedBlok,
+  imageProvider?: ImageProvider,
+): Promise<void> {
   try {
     let filePath: string;
     if (blok.tipe === 'chart') {
       filePath = await renderChart(blok.data as ChartData, { outputDir: path.join(storageDir, 'chart') });
     } else if (blok.tipe === 'diagram') {
       filePath = await renderDiagram(blok.data as DiagramData, { outputDir: path.join(storageDir, 'diagram') });
+    } else if (blok.tipe === 'gambar' && (blok.data as GambarData).source === 'ai') {
+      if (!imageProvider) {
+        console.error(`Gagal generate blok gambar (id=${blok.id}): provider AI gambar belum dikonfigurasi.`);
+        return;
+      }
+      const prompt = (blok.data as GambarData).prompt ?? '';
+      filePath = await generateAI(imageProvider, prompt, { outputDir: path.join(storageDir, 'gambar') });
     } else {
       return;
     }
@@ -89,11 +120,18 @@ function findBabOr404(db: Database.Database, idParam: string, res: Response): Ba
   return bab;
 }
 
-function serializeBlokRow(row: KontenBlokRow): SavedBlok {
-  return { id: row.id, urutan: row.urutan, tipe: row.tipe, data: JSON.parse(row.data_json), file_path: row.file_path };
+function serializeBlokRow(row: KontenBlokRow, storageDir: string): SavedBlok & { file_url: string | null } {
+  return {
+    id: row.id,
+    urutan: row.urutan,
+    tipe: row.tipe,
+    data: JSON.parse(row.data_json),
+    file_path: row.file_path,
+    file_url: toFileUrl(storageDir, row.file_path),
+  };
 }
 
-export function babRoutes({ db, credentials, storageDir }: BabRoutesOptions): Router {
+export function babRoutes({ db, credentials, storageDir, imageProvider }: BabRoutesOptions): Router {
   const router = Router();
   router.use(requireAuth);
 
@@ -106,7 +144,7 @@ export function babRoutes({ db, credentials, storageDir }: BabRoutesOptions): Ro
     const blokRows = db
       .prepare('SELECT * FROM konten_blok WHERE bab_id = ? ORDER BY urutan')
       .all(bab.id) as KontenBlokRow[];
-    res.json({ ...bab, blok: blokRows.map(serializeBlokRow) });
+    res.json({ ...bab, blok: blokRows.map((row) => serializeBlokRow(row, storageDir)) });
   });
 
   router.post('/:id/generate', async (req, res) => {
@@ -196,7 +234,7 @@ export function babRoutes({ db, credentials, storageDir }: BabRoutesOptions): Ro
       });
       const savedBlok = saveBlok(result.blok);
 
-      await Promise.all(savedBlok.map((blok) => renderVisualBlok(db, storageDir, blok)));
+      await Promise.all(savedBlok.map((blok) => renderVisualBlok(db, storageDir, blok, imageProvider)));
 
       db.prepare("UPDATE bab SET status = 'selesai' WHERE id = ?").run(bab.id);
 

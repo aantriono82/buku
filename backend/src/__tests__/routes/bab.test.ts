@@ -12,10 +12,14 @@ vi.mock('../../services/chart-render-service.js', () => ({
 vi.mock('../../services/diagram-render-service.js', () => ({
   renderDiagram: vi.fn(),
 }));
+vi.mock('../../services/image-service.js', () => ({
+  generateAI: vi.fn(),
+}));
 
 import { generateContent } from '../../services/content-service.js';
 import { renderChart } from '../../services/chart-render-service.js';
 import { renderDiagram } from '../../services/diagram-render-service.js';
+import { generateAI } from '../../services/image-service.js';
 import { initDb, closeDb } from '../../db/connection.js';
 import { seedAdminIfMissing } from '../../db/seed-admin.js';
 import { createApp } from '../../app.js';
@@ -25,6 +29,7 @@ import { DEFAULT_TEXT_PROVIDER_CREDENTIALS, type TextProviderCredentials } from 
 const mockedGenerateContent = vi.mocked(generateContent);
 const mockedRenderChart = vi.mocked(renderChart);
 const mockedRenderDiagram = vi.mocked(renderDiagram);
+const mockedGenerateAI = vi.mocked(generateAI);
 
 const credentialsWithOpenRouter: TextProviderCredentials = {
   ...DEFAULT_TEXT_PROVIDER_CREDENTIALS,
@@ -232,6 +237,77 @@ describe('bab routes', () => {
       expect(detail.body.status).toBe('selesai');
       expect(detail.body.blok).toHaveLength(2);
       expect(detail.body.blok[1]).toMatchObject({ tipe: 'chart', file_path: null });
+    });
+
+    it('men-generate blok gambar source ai lewat imageProvider dan simpan file_path', async () => {
+      mockedGenerateAI.mockResolvedValue('/data/storage/gambar/gambar-1.png');
+      mockedGenerateContent.mockResolvedValue({
+        blok: [{ tipe: 'gambar', data: { source: 'ai', prompt: 'ilustrasi daur air', caption: 'Daur air' } }],
+        rawResponse: '{}',
+      });
+
+      const appWithImageProvider = createApp({
+        db,
+        frontendUrl: 'http://localhost:5183',
+        isProduction: false,
+        credentials: credentialsWithOpenRouter,
+        storageDir: './test-storage',
+        imageProvider: { generate: vi.fn() },
+      });
+      const agentWithImage = request.agent(appWithImageProvider);
+      await agentWithImage.post('/api/auth/login').send({ username: 'admin', password: 'password123' });
+
+      const bukuRes = await agentWithImage.post('/api/buku').send({ judul: 'Buku B', mapel: 'IPA', jenjang: 'SD' });
+      const outlineRes = await agentWithImage
+        .put(`/api/buku/${bukuRes.body.id}/outline`)
+        .send({ bab: [{ judul: 'Bab 1', ringkasan: 'r' }] });
+      const babId = outlineRes.body.bab[0].id;
+
+      const res = await agentWithImage.post(`/api/bab/${babId}/generate`).send({ provider: 'openrouter' });
+
+      expect(res.status).toBe(200);
+      expect(mockedGenerateAI).toHaveBeenCalledWith(
+        expect.objectContaining({ generate: expect.any(Function) }),
+        'ilustrasi daur air',
+        expect.objectContaining({ outputDir: expect.stringContaining('gambar') }),
+      );
+
+      const detail = await agentWithImage.get(`/api/bab/${babId}`);
+      expect(detail.body.blok[0]).toMatchObject({ tipe: 'gambar', file_path: '/data/storage/gambar/gambar-1.png' });
+    });
+
+    it('blok gambar source upload tidak memanggil generateAI, file_path tetap null', async () => {
+      mockedGenerateContent.mockResolvedValue({
+        blok: [{ tipe: 'gambar', data: { source: 'upload', caption: 'Menunggu upload guru' } }],
+        rawResponse: '{}',
+      });
+
+      const { babId } = await createBukuWithBab();
+      const res = await agent.post(`/api/bab/${babId}/generate`).send({ provider: 'openrouter' });
+
+      expect(res.status).toBe(200);
+      expect(mockedGenerateAI).not.toHaveBeenCalled();
+
+      const detail = await agent.get(`/api/bab/${babId}`);
+      expect(detail.body.blok[0]).toMatchObject({ tipe: 'gambar', file_path: null });
+    });
+
+    it('blok gambar source ai tanpa imageProvider terkonfigurasi tidak menggagalkan generate bab', async () => {
+      mockedGenerateContent.mockResolvedValue({
+        blok: [{ tipe: 'gambar', data: { source: 'ai', prompt: 'ilustrasi x' } }],
+        rawResponse: '{}',
+      });
+
+      const { babId } = await createBukuWithBab();
+      const res = await agent.post(`/api/bab/${babId}/generate`).send({ provider: 'openrouter' });
+
+      expect(res.status).toBe(200);
+      expect(res.text).toContain('"done":true');
+      expect(mockedGenerateAI).not.toHaveBeenCalled();
+
+      const detail = await agent.get(`/api/bab/${babId}`);
+      expect(detail.body.status).toBe('selesai');
+      expect(detail.body.blok[0]).toMatchObject({ tipe: 'gambar', file_path: null });
     });
 
     it('mengirim event error dan set status bab error kalau generateContent gagal', async () => {

@@ -5,9 +5,12 @@ import type Database from 'better-sqlite3';
 import { authRoutes } from './routes/auth.js';
 import { bukuRoutes } from './routes/buku.js';
 import { babRoutes } from './routes/bab.js';
+import { gambarRoutes } from './routes/gambar.js';
 import { aiProviderRoutes } from './routes/ai-providers.js';
 import { DEFAULT_TEXT_PROVIDER_CREDENTIALS, type TextProviderCredentials } from './services/ai-providers.js';
+import type { ImageProvider } from './services/image-service.js';
 import { errorHandler } from './middleware/error-handler.js';
+import { requireAuth } from './middleware/require-auth.js';
 
 export interface AppOptions {
   db: Database.Database;
@@ -15,6 +18,7 @@ export interface AppOptions {
   isProduction: boolean;
   credentials?: TextProviderCredentials;
   storageDir?: string;
+  imageProvider?: ImageProvider;
 }
 
 export function createApp({
@@ -23,6 +27,7 @@ export function createApp({
   isProduction,
   credentials = DEFAULT_TEXT_PROVIDER_CREDENTIALS,
   storageDir = './data/storage',
+  imageProvider,
 }: AppOptions): Express {
   const app = express();
 
@@ -32,10 +37,12 @@ export function createApp({
   app.use(cookieParser());
 
   app.get('/api/health', (_req, res) => res.json({ status: 'ok', ts: Date.now() }));
+  app.use('/api/storage', requireAuth, express.static(storageDir));
   app.use('/api/auth', authRoutes(db, isProduction));
   app.use('/api/ai-providers', aiProviderRoutes(credentials));
   app.use('/api/buku', bukuRoutes({ db, credentials }));
-  app.use('/api/bab', babRoutes({ db, credentials, storageDir }));
+  app.use('/api/bab', babRoutes({ db, credentials, storageDir, imageProvider }));
+  app.use('/api/blok', gambarRoutes({ db, storageDir, imageProvider }));
 
   app.use(errorHandler);
 

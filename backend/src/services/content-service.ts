@@ -32,7 +32,18 @@ export interface BlokDiagram {
   data: DiagramData;
 }
 
-export type ContentBlok = BlokTeks | BlokTabel | BlokChart | BlokDiagram;
+export interface GambarData {
+  source: 'ai' | 'upload';
+  prompt?: string;
+  caption?: string;
+}
+
+export interface BlokGambar {
+  tipe: 'gambar';
+  data: GambarData;
+}
+
+export type ContentBlok = BlokTeks | BlokTabel | BlokChart | BlokDiagram | BlokGambar;
 
 export interface GenerateContentOptions {
   provider: TextProviderId;
@@ -56,8 +67,9 @@ export function buildContentPrompt(params: ContentParams): { system: string; use
     '{"blok": [{"tipe": "teks", "data": {"markdown": "..."}}, {"tipe": "tabel", "data": {"headers": ["..."], ' +
     '"rows": [["...", "..."]]}}, {"tipe": "chart", "data": {"chart_type": "bar|line|pie", "labels": ["..."], ' +
     '"datasets": [{"label": "...", "data": [1,2,3]}], "judul": "..."}}, {"tipe": "diagram", "data": ' +
-    '{"mermaid_syntax": "flowchart TD\\nA-->B", "judul": "..."}}]}. Tipe blok yang boleh dipakai hanya "teks", ' +
-    '"tabel", "chart", dan "diagram".';
+    '{"mermaid_syntax": "flowchart TD\\nA-->B", "judul": "..."}}, {"tipe": "gambar", "data": {"source": "ai", ' +
+    '"prompt": "deskripsi visual detail untuk AI image generator", "caption": "..."}}]}. Tipe blok yang boleh ' +
+    'dipakai hanya "teks", "tabel", "chart", "diagram", dan "gambar".';
 
   const user = [
     'Tulis isi lengkap untuk satu bab buku pelajaran berikut:',
@@ -72,9 +84,11 @@ export function buildContentPrompt(params: ContentParams): { system: string; use
       'mendalam sesuai cakupan bab, serta sisipkan blok tabel bila ada perbandingan/klasifikasi/data yang cocok ' +
       'disajikan sebagai tabel. Sisipkan juga blok chart (bar/line/pie) HANYA bila ada data numerik yang benar-benar ' +
       'cocok divisualisasikan, dan blok diagram (mermaid flowchart) HANYA bila ada alur proses atau hubungan ' +
-      'konsep yang cocok digambarkan sebagai diagram — jangan paksakan chart/diagram kalau materi tidak butuh, ' +
-      'teks & tabel tetap boleh mendominasi. Urutkan blok sesuai alur penyajian materi yang logis, dari pengantar ' +
-      'sampai rangkuman.',
+      'konsep yang cocok digambarkan sebagai diagram. Sisipkan blok gambar (source "ai", dengan "prompt" berisi ' +
+      'deskripsi visual yang jelas untuk AI image generator, dan "caption" singkat) HANYA bila ilustrasi memang ' +
+      'akan membantu pemahaman siswa (misal ilustrasi objek/proses/tokoh yang dibahas) — jangan paksakan ' +
+      'chart/diagram/gambar kalau materi tidak butuh, teks & tabel tetap boleh mendominasi. Urutkan blok sesuai ' +
+      'alur penyajian materi yang logis, dari pengantar sampai rangkuman.',
   ]
     .filter((line): line is string => line !== null)
     .join('\n');
@@ -126,6 +140,25 @@ function parseDiagramBlok(data: unknown, idx: number): BlokDiagram {
   return { tipe: 'diagram', data };
 }
 
+function parseGambarBlok(data: unknown, idx: number): BlokGambar {
+  const d = data as Partial<GambarData> | null;
+  if (!d || typeof d !== 'object' || (d.source !== 'ai' && d.source !== 'upload')) {
+    throw new Error(`Blok ke-${idx + 1} bertipe gambar tidak punya source ("ai"/"upload") yang valid.`);
+  }
+  if (d.source === 'ai' && (typeof d.prompt !== 'string' || !d.prompt.trim())) {
+    throw new Error(`Blok ke-${idx + 1} bertipe gambar dengan source "ai" wajib punya prompt.`);
+  }
+
+  return {
+    tipe: 'gambar',
+    data: {
+      source: d.source,
+      prompt: typeof d.prompt === 'string' ? d.prompt.trim() : undefined,
+      caption: typeof d.caption === 'string' ? d.caption.trim() : undefined,
+    },
+  };
+}
+
 export function parseContentResponse(raw: string): ContentBlok[] {
   let parsed: unknown;
 
@@ -163,6 +196,9 @@ export function parseContentResponse(raw: string): ContentBlok[] {
     }
     if (tipe === 'diagram') {
       return parseDiagramBlok(data, idx);
+    }
+    if (tipe === 'gambar') {
+      return parseGambarBlok(data, idx);
     }
     throw new Error(`Blok ke-${idx + 1} punya tipe tidak dikenal: "${String(tipe)}".`);
   });

@@ -15,6 +15,59 @@ Log keputusan teknis, masalah yang pernah ditemui, dan catatan progres antar ses
 **Dampak**: bagian kode/desain mana yang terpengaruh
 ```
 
+### [2026-07-23] Stage 5 selesai — imageService, GeminiImageProvider, endpoint upload/regenerate gambar
+**Konteks**: melengkapi blok `gambar` yang skemanya sudah didefinisikan sejak `planning.md` §3 tapi belum
+diimplementasikan di Stage 3/4 (waktu itu belum ada cara generate/upload-nya).
+**Keputusan/temuan**:
+- `imageService` dibuat **fungsional** (`generateAI()`, `saveUpload()` sebagai fungsi biasa di
+  `backend/src/services/image-service.ts`), bukan class `ImageService` seperti sketsa di `planning.md` §6 —
+  supaya konsisten dengan pola `chartRenderService`/`diagramRenderService` yang sudah ada (fungsi + options object,
+  gampang di-mock di test). `ImageProvider` tetap interface seperti planning.md, `GeminiImageProvider` tetap class
+  (masuk akal karena menyimpan state apiKey/model), diimplementasikan di file terpisah
+  `backend/src/services/gemini-image-provider.ts` (pola sama seperti pemisahan `ai-providers.ts`/`ai-text-client.ts`).
+- **API key Gemini Image reuse `GOOGLE_AI_API_KEY`** (env var yang sama dipakai provider teks "Google AI" di
+  Stage 2/3), bukan bikin env var terpisah — satu API key Google AI Studio memang mendukung model teks maupun
+  gambar. Config baru: `IMAGE_PROVIDER` (default `'gemini'`, sesuai `planning.md` §6 "bisa diganti via env var").
+  Kalau `IMAGE_PROVIDER` bukan `'gemini'` atau `GOOGLE_AI_API_KEY` kosong, `imageProvider` di `index.ts` jadi
+  `undefined` — endpoint regenerate akan balas 400, dan auto-generate blok gambar `source: "ai"` saat
+  `POST /api/bab/:id/generate` gagal senyap (dicatat ke stderr, `file_path` tetap null, tidak menggagalkan bab
+  lain) — sama seperti pola kegagalan render chart/diagram di Stage 4.
+- **[Update 2026-07-23, sesi lanjutan] Bentuk request `gemini-image-provider.ts` sudah dites ke API asli
+  pakai `GOOGLE_AI_API_KEY` user (`npx tsx --env-file=.env`, panggil `GeminiImageProvider.generate()` langsung,
+  bukan lewat unit test) — request `generateContent` + `generationConfig.responseModalities: ["IMAGE"]` ke model
+  `gemini-3-pro-image-preview` diterima dan diproses server (bukan 400/404), TAPI balasannya `429
+  RESOURCE_EXHAUSTED`: "Quota exceeded ... model: gemini-3-pro-image, limit: 0" untuk
+  `generate_content_free_tier_requests` dan `generate_content_free_tier_input_token_count`. Kesimpulan: format
+  request/model ID yang diimplementasikan **sudah benar** (tervalidasi API key & endpoint-nya dikenali Google),
+  blocker-nya murni **billing/kuota** — project Google AI Studio yang terhubung ke key ini masih free tier dan
+  model `gemini-3-pro-image` memang limit 0 di free tier (butuh billing aktif di Google Cloud/AI Studio project
+  terkait). Belum bisa validasi bentuk response sukses (field `inlineData` dkk) karena belum pernah dapat
+  response 200 sungguhan — kalau setelah billing diaktifkan ternyata field response beda dari yang
+  diasumsikan, perbaiki `gemini-image-provider.ts` saja, pemanggil tidak perlu berubah (semua lewat interface
+  `ImageProvider`).
+- `contentService` diperluas dengan tipe blok `gambar` (`BlokGambar`/`GambarData`), AI diminta mengusulkan blok
+  ini HANYA kalau ilustrasi benar-benar membantu (sama pola "jangan paksakan" seperti chart/diagram Stage 4) —
+  otomatis dirender lewat `imageService.generateAI()` di `routes/bab.ts` `renderVisualBlok` kalau `source: "ai"`,
+  dilewati kalau `source: "upload"` (guru upload manual belakangan).
+- Endpoint `POST /api/blok/:id/gambar/upload` (multipart, `multer.memoryStorage()`, validasi mimetype
+  png/jpeg/webp, limit 8MB) dan `POST /api/blok/:id/gambar/regenerate` (pakai `prompt` tersimpan di `data_json`
+  kalau body tidak override) dibuat di file baru `backend/src/routes/gambar.ts`, mounted di `/api/blok`. Upload
+  me-replace `data_json.source` jadi `"upload"`; regenerate meng-update jadi `"ai"` + prompt yang dipakai.
+- Ditambahkan (di luar checklist eksplisit Stage 5) static serving `/api/storage` → `storageDir` (di belakang
+  `requireAuth`) + field `file_url` per blok di response `GET /api/bab/:id` (helper `toFileUrl()` di
+  `routes/bab.ts`, diekspor supaya dipakai ulang di `routes/gambar.ts`) — tanpa ini chart/diagram/gambar yang
+  sudah dirender sejak Stage 4 tidak bisa ditampilkan `<img>` di browser sama sekali. `BabView.vue` sekarang
+  render `<img :src="file_url">` untuk tipe chart/diagram/gambar, plus form prompt+upload per blok gambar.
+- Validasi end-to-end (generate AI asli, upload manual asli lewat browser) **belum dites** — sandbox ini tidak
+  ada `GOOGLE_AI_API_KEY` asli dan tidak bisa jalankan browser headless (lihat entri 2026-07-22 soal
+  Chromium/Playwright macet). Validasi dilakukan lewat unit test (`image-service.test.ts`,
+  `gemini-image-provider.test.ts` dengan mock fetch, `bab.test.ts`/`gambar.test.ts` dengan mock
+  `imageService.generateAI`/`saveUpload` via supertest, termasuk kasus upload file asli lewat
+  `.attach()` dan validasi mimetype) — 138 test backend + semua test frontend tetap lulus, `npm run lint` bersih.
+**Dampak**: `backend/src/services/image-service.ts`, `gemini-image-provider.ts` (baru), `content-service.ts`,
+`routes/bab.ts`, `routes/gambar.ts` (baru), `app.ts`, `index.ts`, `config.ts`, `.env.example`, dependency
+`multer`/`@types/multer` baru, `frontend/src/views/BabView.vue`.
+
 ### [2026-07-23] Stage 4 selesai — chartRenderService, diagramRenderService, wiring ke `POST /api/bab/:id/generate`
 **Konteks**: lanjutan Stage 3, menambahkan render chart (chartjs-node-canvas) dan diagram (mermaid-cli) untuk blok
 yang sudah bisa dihasilkan `contentService` sejak stage ini (sebelumnya dibatasi cuma teks & tabel).
@@ -263,24 +316,40 @@ _(kosong — isi saat menemukan masalah non-trivial selama development, misalnya
 ## Hal yang Masih Perlu Divalidasi
 
 - Rate limit & retry strategy untuk Gemini Image API saat generate banyak gambar sekaligus
+- **Billing/kuota Google AI Studio project milik user perlu diaktifkan** supaya model `gemini-3-pro-image` bisa
+  dipakai — dites langsung ke API asli tanggal 2026-07-23, request format diterima Google (bukan 400/404) tapi
+  balik `429 RESOURCE_EXHAUSTED` karena kuota free tier untuk model ini = 0. Lihat entri Stage 5 di atas untuk
+  detail. Setelah billing aktif, perlu tes ulang untuk memvalidasi bentuk response sukses (field `inlineData`
+  dkk di `gemini-image-provider.ts` masih asumsi, belum pernah lihat response 200 sungguhan).
+- Generate blok gambar AI saat ini **blocking di dalam request SSE** `POST /api/bab/:id/generate`, sama seperti
+  chart/diagram (lihat entri Stage 4/5 di atas) — kalau AI image generation lambat (beberapa detik per gambar)
+  dan sebuah bab punya banyak blok gambar sekaligus, ini bisa menambah signifikan waktu tunggu sebelum event
+  `done` — belum diukur karena belum pernah dites ke API asli.
 - Ukuran final Docker image backend setelah LibreOffice + Chromium (mermaid-cli) ditambahkan — apakah perlu dipisah jadi service tersendiri
 - Estimasi waktu generate 1 bab penuh untuk kalibrasi timeout SSE
 - Prompt engineering untuk menentukan kapan materi "layak" divisualisasikan sebagai chart/diagram vs cukup teks —
-  instruksi sudah ditambahkan di `contentService` prompt Stage 4 ("HANYA bila cocok, jangan paksakan"), tapi belum
-  pernah dites ke provider AI asli (tidak ada API key di sandbox ini) untuk lihat apakah AI benar-benar selektif
-  atau malah selalu/tidak pernah menyisipkan chart/diagram
+  instruksi "HANYA bila cocok, jangan paksakan" sudah **terbukti bekerja untuk DeepSeek** (lihat update
+  2026-07-23 di bawah: AI menyisipkan gambar/tabel/diagram hanya di bagian relevan, tidak memaksakan chart kalau
+  tidak ada data numerik yang cocok). Belum dites ke provider lain (OpenCode Zen, Google AI, Anthropic, OpenAI) —
+  kemungkinan perilaku selektif ini bisa beda antar model/provider.
 - Waktu render chart/diagram saat ini **blocking di dalam request SSE** `POST /api/bab/:id/generate` (lihat entri
   Stage 4 di atas) — untuk 1-2 chart/diagram per bab harusnya masih cepat (render manual di sandbox ini < 1 detik
   per chart, mermaid-cli sedikit lebih lambat karena boot Chromium tiap panggilan), tapi kalau AI ternyata
   menghasilkan banyak chart/diagram sekaligus dalam satu bab, ini bisa menambah signifikan waktu tunggu SSE
   sebelum event `done` — belum diukur dengan bab yang benar-benar berisi banyak visualisasi
-- Jalur `generateText()` untuk OpenCode Zen, Google AI, Anthropic, OpenAI, DeepSeek belum pernah dites ke API
-  aslinya (cuma OpenRouter yang di-smoke-test dengan key palsu dan benar-benar hit endpoint asli, error 401
-  balik dengan benar). Base URL & format request disalin dari `rpp-generator` yang sudah terbukti jalan di sana,
-  tapi kalau ada provider yang gagal aneh (bukan sekadar 401 auth), cek dulu apakah `response_format: json_object`
-  didukung provider itu (`jsonMode` bisa di-set false di `generateText()` request kalau ternyata tidak didukung)
-- `maxTokens: 8000` di `contentService.generateContent()` (Stage 3) masih tebakan, belum dites ke provider asli —
-  kalau bab dengan banyak sub-materi/tabel ternyata butuh lebih dari itu, respons JSON bisa terpotong di tengah
-  dan gagal parse (`parseContentResponse` akan throw "bukan JSON yang valid"). Kalau ini kejadian di pemakaian
-  nyata, pertimbangkan naikkan `maxTokens` atau ubah strategi jadi multi-turn (generate per-bagian bab, bukan satu
-  completion untuk seluruh bab) — belum diimplementasikan.
+- **[Update 2026-07-23] Jalur `generateText()` untuk DeepSeek sudah dites end-to-end ke API asli dan berhasil**
+  (`GeminiImageProvider`-style test pakai `npx tsx --env-file=.env`, bukan cuma unit test mock): `generateText()`
+  polos, `outlineService.generateOutline()` (5 bab valid ter-generate & ter-parse), dan
+  `contentService.generateContent()` (bab "Rantai Makanan..." IPA SD, hasil 8 blok: teks/gambar/tabel/diagram
+  campur, JSON ter-parse tanpa error) semuanya sukses pakai provider `deepseek` + model `deepseek-chat` dan
+  `response_format: json_object`. **AI terbukti selektif** menyisipkan blok gambar/tabel/diagram hanya di bagian
+  yang relevan (tidak dipaksakan di tiap bab/paragraf) — prompt "HANYA bila cocok, jangan paksakan" di Stage 4/5
+  bekerja sesuai harapan untuk DeepSeek. Jalur OpenCode Zen, Google AI, Anthropic, OpenAI masih belum dites ke API
+  asli (belum ada key valid untuk provider-provider itu) — base URL & format request disalin dari `rpp-generator`
+  yang sudah terbukti jalan di sana, tapi kalau ada provider yang gagal aneh (bukan sekadar 401 auth), cek dulu
+  apakah `response_format: json_object` didukung provider itu (`jsonMode` bisa di-set false kalau tidak didukung).
+- **[Update 2026-07-23] `maxTokens: 8000` di `contentService.generateContent()` terbukti cukup** untuk DeepSeek
+  pada tes bab IPA SD di atas — rawResponse hanya ~5000 karakter (~1200-an token), jauh di bawah batas. Belum
+  dites untuk bab yang jauh lebih padat (mis. bab dengan banyak sub-materi + beberapa tabel besar sekaligus) —
+  kalau ternyata terpotong di pemakaian nyata (`parseContentResponse` throw "bukan JSON yang valid"),
+  pertimbangkan naikkan `maxTokens` atau ubah strategi jadi multi-turn (generate per-bagian bab).

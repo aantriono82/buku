@@ -13,11 +13,33 @@ interface BlokTabelData {
   rows: string[][];
 }
 
+interface BlokChartData {
+  chart_type: 'bar' | 'line' | 'pie';
+  labels: string[];
+  datasets: { label: string; data: number[] }[];
+  judul?: string;
+}
+
+interface BlokDiagramData {
+  mermaid_syntax: string;
+  judul?: string;
+}
+
+interface BlokGambarData {
+  source: 'ai' | 'upload';
+  prompt?: string;
+  caption?: string;
+}
+
+type BlokData = BlokTeksData | BlokTabelData | BlokChartData | BlokDiagramData | BlokGambarData;
+
 interface BlokItem {
   id: number;
   urutan: number;
-  tipe: 'teks' | 'tabel';
-  data: BlokTeksData | BlokTabelData;
+  tipe: 'teks' | 'tabel' | 'chart' | 'diagram' | 'gambar';
+  data: BlokData;
+  file_path?: string | null;
+  file_url?: string | null;
 }
 
 interface BabDetail {
@@ -52,8 +74,68 @@ const streamText = ref('');
 const generateError = ref('');
 const liveBlok = ref<BlokItem[]>([]);
 
-function isTabelData(data: BlokTeksData | BlokTabelData): data is BlokTabelData {
+const gambarPrompt = ref<Record<number, string>>({});
+const gambarBusy = ref<Record<number, boolean>>({});
+const gambarError = ref<Record<number, string>>({});
+
+function isTabelData(data: BlokData): data is BlokTabelData {
   return 'headers' in data;
+}
+
+function isGambarData(data: BlokData): data is BlokGambarData {
+  return 'source' in data;
+}
+
+function promptFor(blok: BlokItem): string {
+  if (gambarPrompt.value[blok.id] !== undefined) {
+    return gambarPrompt.value[blok.id];
+  }
+  const data = blok.data as BlokGambarData;
+  return data.prompt || '';
+}
+
+async function handleRegenerateGambar(blok: BlokItem): Promise<void> {
+  const prompt = promptFor(blok).trim();
+  gambarBusy.value[blok.id] = true;
+  gambarError.value[blok.id] = '';
+  try {
+    await api.post(`/blok/${blok.id}/gambar/regenerate`, { prompt: prompt || undefined });
+    await loadBab();
+  } catch (err) {
+    gambarError.value[blok.id] = err instanceof ApiError ? err.message : 'Gagal generate gambar AI.';
+  } finally {
+    gambarBusy.value[blok.id] = false;
+  }
+}
+
+async function handleUploadGambar(blok: BlokItem, event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (!file) {
+    return;
+  }
+
+  gambarBusy.value[blok.id] = true;
+  gambarError.value[blok.id] = '';
+  try {
+    const formData = new FormData();
+    formData.append('gambar', file);
+    const res = await fetch(`${API_BASE}/blok/${blok.id}/gambar/upload`, {
+      method: 'POST',
+      credentials: 'include',
+      body: formData,
+    });
+    if (!res.ok) {
+      const body: { message?: string } = await res.json().catch(() => ({ message: res.statusText }));
+      throw new Error(body.message || `HTTP error ${res.status}`);
+    }
+    await loadBab();
+  } catch (err) {
+    gambarError.value[blok.id] = err instanceof Error ? err.message : 'Gagal mengunggah gambar.';
+  } finally {
+    gambarBusy.value[blok.id] = false;
+    input.value = '';
+  }
 }
 
 async function loadBab(): Promise<void> {
@@ -206,6 +288,9 @@ onMounted(() => {
             </tr>
           </tbody>
         </table>
+        <p v-else-if="b.tipe === 'chart'" class="hint">Chart sedang dirender...</p>
+        <p v-else-if="b.tipe === 'diagram'" class="hint">Diagram sedang dirender...</p>
+        <p v-else-if="b.tipe === 'gambar'" class="hint">Gambar sedang diproses...</p>
       </div>
     </section>
 
@@ -225,6 +310,48 @@ onMounted(() => {
             </tr>
           </tbody>
         </table>
+
+        <div v-else-if="b.tipe === 'chart' || b.tipe === 'diagram'" class="blok-media">
+          <img v-if="b.file_url" :src="b.file_url" :alt="b.tipe" class="blok-img" />
+          <p v-else class="hint">Belum ter-render.</p>
+        </div>
+
+        <div v-else-if="b.tipe === 'gambar'" class="blok-gambar">
+          <img
+            v-if="b.file_url"
+            :src="b.file_url"
+            :alt="isGambarData(b.data) ? b.data.caption : 'gambar'"
+            class="blok-img"
+          />
+          <p v-else class="hint">Belum ada gambar tersimpan untuk blok ini.</p>
+          <p v-if="isGambarData(b.data) && b.data.caption" class="caption">{{ b.data.caption }}</p>
+
+          <div class="gambar-controls">
+            <label>
+              Prompt AI
+              <input
+                type="text"
+                :value="promptFor(b)"
+                :disabled="gambarBusy[b.id]"
+                placeholder="deskripsi gambar untuk AI image generator"
+                @input="gambarPrompt[b.id] = ($event.target as HTMLInputElement).value"
+              />
+            </label>
+            <button type="button" :disabled="gambarBusy[b.id]" @click="handleRegenerateGambar(b)">
+              {{ gambarBusy[b.id] ? 'Memproses...' : 'Generate Ulang (AI)' }}
+            </button>
+            <label class="upload-label">
+              Upload manual
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                :disabled="gambarBusy[b.id]"
+                @change="handleUploadGambar(b, $event)"
+              />
+            </label>
+          </div>
+          <p v-if="gambarError[b.id]" class="error">{{ gambarError[b.id] }}</p>
+        </div>
       </div>
     </section>
     <p v-else class="hint">Bab ini belum punya konten. Klik "Generate Konten Bab" untuk mulai.</p>
@@ -325,5 +452,35 @@ button:disabled {
   padding: 6px 10px;
   text-align: left;
   font-size: 14px;
+}
+
+.blok-img {
+  max-width: 100%;
+  border-radius: 6px;
+  display: block;
+}
+
+.blok-gambar .caption {
+  font-size: 13px;
+  color: var(--text);
+  margin: 6px 0;
+  font-style: italic;
+}
+
+.gambar-controls {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  margin-top: 10px;
+}
+
+.gambar-controls label {
+  flex: 1 1 220px;
+}
+
+.upload-label input[type='file'] {
+  padding: 6px 0;
+  border: none;
 }
 </style>

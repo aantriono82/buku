@@ -56,14 +56,14 @@ Konvensi: `[ ]` belum, `[~]` sedang dikerjakan, `[x]` selesai (lint bersih + tes
 
 ## Stage 5 — Gambar (AI + Upload Manual)
 
-- [ ] Interface `ImageProvider`
-- [ ] `GeminiImageProvider` (implementasi default)
-- [ ] `imageService.generateAI()` + `imageService.saveUpload()`
-- [ ] Unit test `imageService` (mock provider, mock file upload)
-- [ ] Endpoint `POST /api/blok/:id/gambar/upload` (multipart)
-- [ ] Endpoint `POST /api/blok/:id/gambar/regenerate`
-- [ ] UI pilih generate AI vs upload manual per blok gambar
-- [ ] Validasi: gambar AI ter-generate & tersimpan; upload manual berhasil replace blok
+- [x] Interface `ImageProvider`
+- [x] `GeminiImageProvider` (implementasi default)
+- [x] `imageService.generateAI()` + `imageService.saveUpload()`
+- [x] Unit test `imageService` (mock provider, mock file upload)
+- [x] Endpoint `POST /api/blok/:id/gambar/upload` (multipart)
+- [x] Endpoint `POST /api/blok/:id/gambar/regenerate`
+- [x] UI pilih generate AI vs upload manual per blok gambar
+- [x] Validasi: gambar AI ter-generate & tersimpan; upload manual berhasil replace blok
 
 ## Stage 6 — Export DOCX + PDF
 
@@ -133,3 +133,18 @@ Konvensi: `[ ]` belum, `[~]` sedang dikerjakan, `[x]` selesai (lint bersih + tes
 - [x] `GET /api/bab/:id` sekarang ikut mengembalikan `file_path` per blok (sebelumnya cuma `id/urutan/tipe/data`)
       — perlu supaya klien tahu chart/diagram sudah/belum selesai dirender. Bukan endpoint baru, cuma field
       tambahan di response yang sudah ada.
+- [x] `contentService` (Stage 3/4) diperluas dengan tipe blok `gambar` (`{ source: "ai"|"upload", prompt?, caption? }`)
+      — sudah ada di `planning.md` §3 data_json gambar dan §4 pipeline ("blok gambar (prompt AI ATAU placeholder
+      menunggu upload guru)"), belum diimplementasikan di Stage 3/4 karena waktu itu belum ada `imageService`
+      untuk memprosesnya. Diselesaikan sekarang di Stage 5 karena blok gambar tidak berguna tanpa cara
+      generate/upload-nya.
+- [x] `routes/bab.ts` `renderVisualBlok` diperluas: blok gambar dengan `source: "ai"` langsung dipanggil
+      `imageService.generateAI()` saat `POST /api/bab/:id/generate` (sama seperti chart/diagram, kegagalan tidak
+      menggagalkan bab lain). Blok `source: "upload"` sengaja dilewati, menunggu guru upload manual.
+- [x] Static file serving `/api/storage` (mount `express.static(storageDir)`, di belakang `requireAuth`) + field
+      `file_url` di tiap blok pada response `GET /api/bab/:id` — bukan bagian checklist eksplisit Stage 5, tapi
+      diperlukan supaya frontend bisa preview gambar/chart/diagram yang sudah dirender (sebelumnya `file_path`
+      cuma path disk server, tidak bisa diakses browser). Tanpa ini validasi "gambar AI ter-generate & tersimpan"
+      tidak bisa diverifikasi lewat UI.
+- [x] Dependency baru `multer` (+ `@types/multer`) untuk endpoint upload multipart, mengikuti pola yang sama
+      persis dengan `rpp-generator` (`multer.memoryStorage()`, `fileFilter` validasi mimetype, limit ukuran file).

@@ -51,6 +51,7 @@ Backend:
 ```bash
 cd backend
 cp .env.example .env   # isi kredensial/konfigurasi + minimal 1 API key provider AI teks
+                       # (GOOGLE_AI_API_KEY dipakai juga untuk AI gambar/Gemini Image, lihat IMAGE_PROVIDER)
 npm install
 npm run dev
 ```
@@ -75,9 +76,9 @@ Script yang tersedia di `backend/` dan `frontend/`: `npm run dev`, `npm run buil
 
 - [x] Stage 1 — Scaffold & Database
 - [x] Stage 2 — Outline & Bab
-- [ ] Stage 3 — Generate Konten Bab (Teks + Tabel)
-- [ ] Stage 4 — Chart & Diagram Rendering
-- [ ] Stage 5 — Gambar (AI + Upload Manual)
+- [x] Stage 3 — Generate Konten Bab (Teks + Tabel)
+- [x] Stage 4 — Chart & Diagram Rendering
+- [x] Stage 5 — Gambar (AI + Upload Manual)
 - [ ] Stage 6 — Export DOCX + PDF
 - [ ] Stage 7 — Bot Telegram
 - [ ] Stage 8 — CI/CD, GHCR & Deployment (Arcane)
