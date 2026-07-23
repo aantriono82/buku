@@ -15,6 +15,82 @@ Log keputusan teknis, masalah yang pernah ditemui, dan catatan progres antar ses
 **Dampak**: bagian kode/desain mana yang terpengaruh
 ```
 
+### [2026-07-23] Stage 6 selesai — exportService, DOCX+PDF, endpoint export async job
+**Konteks**: melengkapi pipeline akhir (`planning.md` §4 poin 5-6): setelah semua bab berstatus `selesai`, compile
+seluruh bab+blok jadi satu DOCX, opsional konversi ke PDF via LibreOffice.
+**Keputusan/temuan**:
+- **Diagram default diubah dari SVG ke PNG** (`diagram-render-service.ts`, `options.format ?? 'png'` bukan
+  `'svg'` lagi) — lib `docx` (dicek langsung dari `.d.ts` versi 9.7.1) memang bisa menyisipkan `type: "svg"`,
+  TAPI mewajibkan properti `fallback` berisi gambar raster (PNG/JPG) untuk kompatibilitas Word — kita tidak
+  pernah punya raster fallback untuk diagram (cuma render SVG dari mmdc). Daripada nambah dependency konversi
+  SVG→PNG (mis. `sharp`, native dep berat, berisiko sama seperti kekhawatiran `canvas`/cairo di Stage 4),
+  pilihannya render diagram sebagai PNG langsung dari awal — `mmdc` sudah native dukung ini (`-o file.png`,
+  tidak butuh step konversi terpisah). Ini **masih dalam ruang keputusan yang disetujui** planning.md §2
+  ("Diagram render ... → output SVG/PNG", dua-duanya disebut sah), jadi tidak perlu konfirmasi user ulang.
+  Dampak: diagram yang sudah ter-render sebelum perubahan ini (kalau ada, di storage lama) masih `.svg` dan
+  TIDAK bisa disisipkan `exportService` (akan diganti paragraf peringatan "[Media belum tersedia]" karena
+  ekstensi tidak dikenali) — generate ulang bab tersebut untuk dapat PNG.
+- **`exportService`** (`backend/src/services/export-service.ts`) dibuat sebagai kumpulan fungsi murni (bukan
+  class seperti draft `exportService` di percakapan awal), konsisten dengan pola `chartRenderService`/
+  `diagramRenderService`/`imageService`. Dua fungsi utama:
+  - `buildDocx(buku, babList): Promise<Buffer>` — pakai lib `docx` (npm, dicek dulu versi 9.7.1 tidak butuh
+    native dependency, ESM-native). Mapping: `teks` → `Paragraph[]` dengan heuristik markdown sangat sederhana
+    (baris `#`/`##`/`###` di awal → `HeadingLevel.HEADING_2/3/4`, baris lain → paragraf biasa; TIDAK pakai
+    markdown parser library, cukup regex, karena `BabView.vue` juga masih menampilkan markdown mentah tanpa
+    parser — konsisten dengan keputusan Stage 3 "belum ada markdown renderer, tanya user dulu kalau perlu").
+    `tabel` → `Table` docx dengan header row bold. `chart`/`diagram`/`gambar` → `ImageRun`, ukuran diskalakan
+    proporsional maks lebar 500px pakai dimensi asli dari `image-size` (npm, pure-JS tanpa native dep, baca
+    width/height dari buffer PNG/JPG tanpa decode penuh).
+  - `convertDocxToPdf(docxPath, options): Promise<string>` — wrapper `soffice --headless --convert-to pdf`,
+    pola identik `runMmdc` di `diagram-render-service.ts` (spawn di-inject via `spawnImpl` untuk testability,
+    default `spawn` asli). Setelah exit code 0, **verifikasi file PDF benar-benar ada** (`fs.access`) sebelum
+    dianggap sukses — LibreOffice bisa exit 0 tapi diam-diam gagal menulis output di beberapa kasus edge.
+  - **Kegagalan satu gambar TIDAK menggagalkan seluruh export** (pola sama Stage 4/5): format tidak didukung
+    docx (mis. upload manual `.webp` — lib `docx` cuma dukung `jpg|png|gif|bmp`, tidak ada `webp`) atau file
+    hilang dari disk → diganti paragraf peringatan italic, bukan throw. Blok `chart`/`diagram`/`gambar` yang
+    `file_path`-nya masih `null` (belum selesai dirender/digenerate) juga dapat paragraf peringatan
+    "[Media belum tersedia]", bukan bikin export gagal total.
+- **Alur job async, bukan SSE** — beda dari outline/generate-bab (Stage 2/3) yang pakai SSE, export pakai pola
+  polling sesuai `planning.md` §5 (`POST .../export` lalu `GET /api/export/:jobId` berulang) karena kompilasi
+  dokumen + konversi PDF bisa makan waktu lebih lama dari life-cycle satu request HTTP, dan tidak ada progres
+  granular yang berarti untuk di-stream (beda dengan generate AI yang punya token-by-token). Endpoint
+  `POST /api/buku/:id/export` langsung balas `202` dengan `job.status = 'pending'`, lalu proses (`runExportJob`
+  di `routes/export.ts`) jalan **tidak di-await** (`void runExportJob(...)`) — konsisten dengan pola project
+  lain user yang punya job status field (`bab.status`, sekarang `export_job.status`), status di-update di 3
+  titik: `processing` di awal, `selesai` + `file_path` kalau sukses, `error` + `error_message` di catch block
+  (nangkep SEMUA kegagalan termasuk buku/bab tidak ketemu saat job diproses, compile DOCX gagal, atau konversi
+  PDF gagal — tidak ada request yang menunggu, jadi tidak ada mekanisme lain untuk melaporkan error selain
+  kolom ini).
+- **Validasi sebelum bikin job**: `POST /api/buku/:id/export` menolak 400 kalau buku belum punya bab sama
+  sekali, ATAU ada bab yang statusnya bukan `'selesai'` — sesuai `planning.md` §4 poin 5 ("Setelah semua bab
+  berstatus 'selesai'"). Validasi ini di endpoint trigger (`routes/export.ts` `bukuExportRoutes`), bukan di
+  `exportService` (yang cuma terima data buku+bab jadi, tidak tahu soal status).
+- **Routing**: dipisah jadi 2 fungsi di file yang sama (`routes/export.ts`) — `bukuExportRoutes` (mounted
+  `/api/buku`, cuma `POST /:id/export`) dan `exportJobRoutes` (mounted `/api/export`, `GET /:jobId` +
+  `GET /:jobId/download`) — bukan digabung ke `routes/buku.ts` yang sudah ada, supaya domain "job export" (yang
+  py logic beda: async job + file download) tetap terpisah dari CRUD buku/outline. Dua router beda boleh
+  mounted di prefix yang sama (`/api/buku`) di Express tanpa konflik — request yang tidak match rute manapun di
+  router pertama otomatis lanjut ke router berikutnya (`bukuRoutes` tidak punya route `POST /:id/export`, jadi
+  fallthrough ke `bukuExportRoutes`). `GET /api/export/:jobId/download` pakai `res.download()` Express bawaan,
+  nama file di-generate dari judul buku (disanitasi jadi slug aman) + ekstensi sesuai `format`.
+- **Test `exportService` pakai `jszip`** (ditambahkan sebagai devDependency eksplisit, sudah otomatis ada di
+  `node_modules` sebagai dependency transitif `docx` v9 tapi sengaja dideklarasikan sendiri) untuk buka isi
+  `.docx` (format ZIP) dan assert string tertentu ada di `word/document.xml` — lebih kuat dari sekadar cek
+  magic bytes `PK`, tanpa perlu render visual/buka di Word beneran.
+- **Validasi end-to-end nyata dilakukan** (bukan cuma unit test/mock) — beda dari kebanyakan stage sebelumnya
+  yang mengandalkan mock murni karena sandbox tidak punya API key asli: `chartRenderService` +
+  `diagramRenderService` (asli, bukan mock) + `exportService.buildDocx()` + `exportService.convertDocxToPdf()`
+  dijalankan berantai dengan data asli (`npx tsx` smoke script, dihapus setelah selesai) — hasil: DOCX 25KB
+  valid (berisi chart PNG asli dari `chartjs-node-canvas` dan diagram PNG asli dari `mermaid-cli`), dikonversi
+  `soffice` (LibreOffice 24.2.7.2, tersedia di sandbox ini di `/usr/bin/soffice`) jadi PDF 58KB dengan magic
+  bytes `%PDF-` valid. Ini membuktikan seluruh chain render→compile→convert benar-benar jalan di environment
+  ini, bukan cuma lolos mock. **LibreOffice headless TERBUKTI tersedia & jalan di sandbox** — kalau sesi
+  berikutnya butuh tes serupa, tidak perlu install apapun, `soffice` sudah ada di PATH.
+**Dampak**: file baru `backend/src/services/export-service.ts` + test-nya, `backend/src/routes/export.ts` + test
+-nya; `app.ts` (mount `bukuExportRoutes`/`exportJobRoutes`); `diagram-render-service.ts` (default format PNG).
+Dependency baru: `docx`, `image-size` (runtime), `jszip` (devDependency). Test: 160 test backend lulus (22 baru:
+7 `export-service` + 15 `routes/export`), lint (`eslint` + `prettier --check`) dan `tsc --noEmit` bersih.
+
 ### [2026-07-23] Stage 5 selesai — imageService, GeminiImageProvider, endpoint upload/regenerate gambar
 **Konteks**: melengkapi blok `gambar` yang skemanya sudah didefinisikan sejak `planning.md` §3 tapi belum
 diimplementasikan di Stage 3/4 (waktu itu belum ada cara generate/upload-nya).

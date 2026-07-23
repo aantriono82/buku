@@ -69,6 +69,6 @@ Tidak ada perubahan kode yang dianggap selesai tanpa ini, termasuk perubahan kec
 - [x] Stage 3 — Generate Konten Bab (Teks + Tabel)
 - [x] Stage 4 — Chart & Diagram Rendering
 - [x] Stage 5 — Gambar (AI + Upload Manual)
-- [ ] Stage 6 — Export DOCX + PDF
+- [x] Stage 6 — Export DOCX + PDF
 - [ ] Stage 7 — Bot Telegram
 - [ ] Stage 8 — Deployment

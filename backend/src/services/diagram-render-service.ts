@@ -51,7 +51,10 @@ export async function renderDiagram(data: DiagramData, options: RenderDiagramOpt
   }
 
   await fs.mkdir(options.outputDir, { recursive: true });
-  const format = options.format ?? 'svg';
+  // Default PNG (bukan SVG): exportService (Stage 6) menyisipkan diagram ke DOCX via `docx` ImageRun, yang
+  // mensyaratkan fallback raster untuk tipe "svg" (tidak dipunyai pipeline ini). PNG langsung didukung mmdc
+  // (cukup ganti ekstensi -o) dan tetap valid dipakai browser (planning.md §2 menyebut SVG/PNG dua-duanya sah).
+  const format = options.format ?? 'png';
   const fileName = options.fileName ?? `diagram-${randomUUID()}.${format}`;
   const outputPath = path.join(options.outputDir, fileName);
   const inputPath = path.join(options.outputDir, `${randomUUID()}.mmd`);

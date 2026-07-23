@@ -21,7 +21,9 @@
     "chartjs-node-canvas": "^5.0.0",
     "cookie-parser": "^1.4.6",
     "cors": "^2.8.5",
+    "docx": "^9.7.1",
     "express": "^4.19.2",
+    "image-size": "^2.0.2",
     "multer": "^2.2.0"
   },
   "devDependencies": {
@@ -37,6 +39,7 @@
     "eslint": "^9.9.0",
     "eslint-config-prettier": "^9.1.0",
     "globals": "^15.9.0",
+    "jszip": "^3.10.1",
     "prettier": "^3.3.3",
     "supertest": "^7.0.0",
     "tsx": "^4.19.0",

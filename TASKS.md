@@ -67,15 +67,15 @@ Konvensi: `[ ]` belum, `[~]` sedang dikerjakan, `[x]` selesai (lint bersih + tes
 
 ## Stage 6 — Export DOCX + PDF
 
-- [ ] `exportService`: compile bab+blok → DOCX (lib `docx`)
-- [ ] Mapping tipe blok → elemen DOCX (teks/tabel/chart/diagram/gambar)
-- [ ] Unit test `exportService` (mock data buku lengkap → cek struktur DOCX dihasilkan benar)
-- [ ] Konversi DOCX→PDF via LibreOffice headless
-- [ ] Unit test wrapper konversi (mock child_process, cek error handling saat LibreOffice gagal)
-- [ ] Endpoint `POST /api/buku/:id/export`
-- [ ] Endpoint `GET /api/export/:jobId`
-- [ ] Endpoint `GET /api/export/:jobId/download`
-- [ ] Validasi: buku 5 bab lengkap → DOCX valid + PDF hasil konversi
+- [x] `exportService`: compile bab+blok → DOCX (lib `docx`)
+- [x] Mapping tipe blok → elemen DOCX (teks/tabel/chart/diagram/gambar)
+- [x] Unit test `exportService` (mock data buku lengkap → cek struktur DOCX dihasilkan benar)
+- [x] Konversi DOCX→PDF via LibreOffice headless
+- [x] Unit test wrapper konversi (mock child_process, cek error handling saat LibreOffice gagal)
+- [x] Endpoint `POST /api/buku/:id/export`
+- [x] Endpoint `GET /api/export/:jobId`
+- [x] Endpoint `GET /api/export/:jobId/download`
+- [x] Validasi: buku 5 bab lengkap → DOCX valid + PDF hasil konversi
 
 ## Stage 7 — Bot Telegram
 
@@ -148,3 +148,11 @@ Konvensi: `[ ]` belum, `[~]` sedang dikerjakan, `[x]` selesai (lint bersih + tes
       tidak bisa diverifikasi lewat UI.
 - [x] Dependency baru `multer` (+ `@types/multer`) untuk endpoint upload multipart, mengikuti pola yang sama
       persis dengan `rpp-generator` (`multer.memoryStorage()`, `fileFilter` validasi mimetype, limit ukuran file).
+- [x] Default format `diagramRenderService` diubah dari `svg` ke `png` (Stage 6) — dibutuhkan supaya
+      `exportService` bisa menyisipkan diagram ke DOCX tanpa perlu fallback raster (lib `docx` mensyaratkan
+      fallback PNG/JPG untuk tipe gambar "svg"). Tetap dalam ruang keputusan yang sudah disetujui — `planning.md`
+      §2 menyebut diagram boleh SVG **atau** PNG. Lihat `MEMORY.md` untuk detail.
+- [x] Dependency baru `docx`, `image-size` (runtime) dan `jszip` (devDependency, untuk unit test
+      `exportService` — inspeksi isi `word/document.xml` hasil `buildDocx()`; sudah otomatis ada di
+      `node_modules` sebagai dependency transitif `docx`, ditambahkan eksplisit sebagai devDependency supaya
+      tidak diam-diam bergantung pada paket yang tidak dideklarasikan).

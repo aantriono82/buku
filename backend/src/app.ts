@@ -6,6 +6,7 @@ import { authRoutes } from './routes/auth.js';
 import { bukuRoutes } from './routes/buku.js';
 import { babRoutes } from './routes/bab.js';
 import { gambarRoutes } from './routes/gambar.js';
+import { bukuExportRoutes, exportJobRoutes } from './routes/export.js';
 import { aiProviderRoutes } from './routes/ai-providers.js';
 import { DEFAULT_TEXT_PROVIDER_CREDENTIALS, type TextProviderCredentials } from './services/ai-providers.js';
 import type { ImageProvider } from './services/image-service.js';
@@ -41,8 +42,10 @@ export function createApp({
   app.use('/api/auth', authRoutes(db, isProduction));
   app.use('/api/ai-providers', aiProviderRoutes(credentials));
   app.use('/api/buku', bukuRoutes({ db, credentials }));
+  app.use('/api/buku', bukuExportRoutes({ db, storageDir }));
   app.use('/api/bab', babRoutes({ db, credentials, storageDir, imageProvider }));
   app.use('/api/blok', gambarRoutes({ db, storageDir, imageProvider }));
+  app.use('/api/export', exportJobRoutes({ db, storageDir }));
 
   app.use(errorHandler);
 
