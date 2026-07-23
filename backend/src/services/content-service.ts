@@ -1,5 +1,7 @@
 import { generateText, type AnthropicStreamClient } from './ai-text-client.js';
 import type { TextProviderId } from './ai-providers.js';
+import { isValidChartData, type ChartData } from './chart-render-service.js';
+import { isValidDiagramData, type DiagramData } from './diagram-render-service.js';
 
 export interface ContentParams {
   judulBuku: string;
@@ -20,7 +22,17 @@ export interface BlokTabel {
   data: { headers: string[]; rows: string[][] };
 }
 
-export type ContentBlok = BlokTeks | BlokTabel;
+export interface BlokChart {
+  tipe: 'chart';
+  data: ChartData;
+}
+
+export interface BlokDiagram {
+  tipe: 'diagram';
+  data: DiagramData;
+}
+
+export type ContentBlok = BlokTeks | BlokTabel | BlokChart | BlokDiagram;
 
 export interface GenerateContentOptions {
   provider: TextProviderId;
@@ -42,7 +54,10 @@ export function buildContentPrompt(params: ContentParams): { system: string; use
     'Anda adalah penulis buku pelajaran sekolah Indonesia yang menyusun isi satu bab dalam bentuk blok konten ' +
     'terstruktur. Selalu jawab HANYA dengan JSON valid tanpa teks atau markdown lain, dengan struktur persis: ' +
     '{"blok": [{"tipe": "teks", "data": {"markdown": "..."}}, {"tipe": "tabel", "data": {"headers": ["..."], ' +
-    '"rows": [["...", "..."]]}}]}. Tipe blok yang boleh dipakai hanya "teks" dan "tabel".';
+    '"rows": [["...", "..."]]}}, {"tipe": "chart", "data": {"chart_type": "bar|line|pie", "labels": ["..."], ' +
+    '"datasets": [{"label": "...", "data": [1,2,3]}], "judul": "..."}}, {"tipe": "diagram", "data": ' +
+    '{"mermaid_syntax": "flowchart TD\\nA-->B", "judul": "..."}}]}. Tipe blok yang boleh dipakai hanya "teks", ' +
+    '"tabel", "chart", dan "diagram".';
 
   const user = [
     'Tulis isi lengkap untuk satu bab buku pelajaran berikut:',
@@ -55,8 +70,11 @@ export function buildContentPrompt(params: ContentParams): { system: string; use
     '',
     'Susun beberapa blok teks penjelasan (markdown, boleh berisi subjudul, paragraf, daftar) yang runtut dan ' +
       'mendalam sesuai cakupan bab, serta sisipkan blok tabel bila ada perbandingan/klasifikasi/data yang cocok ' +
-      'disajikan sebagai tabel. Urutkan blok sesuai alur penyajian materi yang logis, dari pengantar sampai ' +
-      'rangkuman.',
+      'disajikan sebagai tabel. Sisipkan juga blok chart (bar/line/pie) HANYA bila ada data numerik yang benar-benar ' +
+      'cocok divisualisasikan, dan blok diagram (mermaid flowchart) HANYA bila ada alur proses atau hubungan ' +
+      'konsep yang cocok digambarkan sebagai diagram — jangan paksakan chart/diagram kalau materi tidak butuh, ' +
+      'teks & tabel tetap boleh mendominasi. Urutkan blok sesuai alur penyajian materi yang logis, dari pengantar ' +
+      'sampai rangkuman.',
   ]
     .filter((line): line is string => line !== null)
     .join('\n');
@@ -94,6 +112,20 @@ function parseTabelBlok(data: unknown, idx: number): BlokTabel {
   };
 }
 
+function parseChartBlok(data: unknown, idx: number): BlokChart {
+  if (!isValidChartData(data)) {
+    throw new Error(`Blok ke-${idx + 1} bertipe chart tidak punya data chart yang valid.`);
+  }
+  return { tipe: 'chart', data };
+}
+
+function parseDiagramBlok(data: unknown, idx: number): BlokDiagram {
+  if (!isValidDiagramData(data)) {
+    throw new Error(`Blok ke-${idx + 1} bertipe diagram tidak punya mermaid_syntax yang valid.`);
+  }
+  return { tipe: 'diagram', data };
+}
+
 export function parseContentResponse(raw: string): ContentBlok[] {
   let parsed: unknown;
 
@@ -125,6 +157,12 @@ export function parseContentResponse(raw: string): ContentBlok[] {
     }
     if (tipe === 'tabel') {
       return parseTabelBlok(data, idx);
+    }
+    if (tipe === 'chart') {
+      return parseChartBlok(data, idx);
+    }
+    if (tipe === 'diagram') {
+      return parseDiagramBlok(data, idx);
     }
     throw new Error(`Blok ke-${idx + 1} punya tipe tidak dikenal: "${String(tipe)}".`);
   });

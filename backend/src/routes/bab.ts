@@ -1,7 +1,10 @@
+import path from 'path';
 import { Router, type Response } from 'express';
 import type Database from 'better-sqlite3';
 import { requireAuth } from '../middleware/require-auth.js';
 import { generateContent, type ContentBlok } from '../services/content-service.js';
+import { renderChart, type ChartData } from '../services/chart-render-service.js';
+import { renderDiagram, type DiagramData } from '../services/diagram-render-service.js';
 import {
   TEXT_PROVIDERS,
   isTextProviderId,
@@ -40,6 +43,37 @@ export interface KontenBlokRow {
 export interface BabRoutesOptions {
   db: Database.Database;
   credentials: TextProviderCredentials;
+  storageDir: string;
+}
+
+interface SavedBlok {
+  id: number;
+  urutan: number;
+  tipe: string;
+  data: unknown;
+  file_path?: string | null;
+}
+
+/**
+ * Render blok chart/diagram jadi PNG/SVG dan simpan file_path ke DB. Kegagalan render satu blok tidak
+ * menggagalkan seluruh generate bab (teks/tabel tetap valid) — cukup dicatat ke stderr, file_path tetap null.
+ */
+async function renderVisualBlok(db: Database.Database, storageDir: string, blok: SavedBlok): Promise<void> {
+  try {
+    let filePath: string;
+    if (blok.tipe === 'chart') {
+      filePath = await renderChart(blok.data as ChartData, { outputDir: path.join(storageDir, 'chart') });
+    } else if (blok.tipe === 'diagram') {
+      filePath = await renderDiagram(blok.data as DiagramData, { outputDir: path.join(storageDir, 'diagram') });
+    } else {
+      return;
+    }
+    db.prepare('UPDATE konten_blok SET file_path = ? WHERE id = ?').run(filePath, blok.id);
+    blok.file_path = filePath;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`Gagal merender blok ${blok.tipe} (id=${blok.id}): ${message}`);
+  }
 }
 
 function findBabOr404(db: Database.Database, idParam: string, res: Response): BabDetailRow | undefined {
@@ -55,11 +89,11 @@ function findBabOr404(db: Database.Database, idParam: string, res: Response): Ba
   return bab;
 }
 
-function serializeBlokRow(row: KontenBlokRow): { id: number; urutan: number; tipe: string; data: unknown } {
-  return { id: row.id, urutan: row.urutan, tipe: row.tipe, data: JSON.parse(row.data_json) };
+function serializeBlokRow(row: KontenBlokRow): SavedBlok {
+  return { id: row.id, urutan: row.urutan, tipe: row.tipe, data: JSON.parse(row.data_json), file_path: row.file_path };
 }
 
-export function babRoutes({ db, credentials }: BabRoutesOptions): Router {
+export function babRoutes({ db, credentials, storageDir }: BabRoutesOptions): Router {
   const router = Router();
   router.use(requireAuth);
 
@@ -161,6 +195,8 @@ export function babRoutes({ db, credentials }: BabRoutesOptions): Router {
         });
       });
       const savedBlok = saveBlok(result.blok);
+
+      await Promise.all(savedBlok.map((blok) => renderVisualBlok(db, storageDir, blok)));
 
       db.prepare("UPDATE bab SET status = 'selesai' WHERE id = ?").run(bab.id);
 

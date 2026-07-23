@@ -14,6 +14,7 @@ export interface AppOptions {
   frontendUrl: string;
   isProduction: boolean;
   credentials?: TextProviderCredentials;
+  storageDir?: string;
 }
 
 export function createApp({
@@ -21,6 +22,7 @@ export function createApp({
   frontendUrl,
   isProduction,
   credentials = DEFAULT_TEXT_PROVIDER_CREDENTIALS,
+  storageDir = './data/storage',
 }: AppOptions): Express {
   const app = express();
 
@@ -33,7 +35,7 @@ export function createApp({
   app.use('/api/auth', authRoutes(db, isProduction));
   app.use('/api/ai-providers', aiProviderRoutes(credentials));
   app.use('/api/buku', bukuRoutes({ db, credentials }));
-  app.use('/api/bab', babRoutes({ db, credentials }));
+  app.use('/api/bab', babRoutes({ db, credentials, storageDir }));
 
   app.use(errorHandler);
 

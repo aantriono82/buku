@@ -47,12 +47,12 @@ Konvensi: `[ ]` belum, `[~]` sedang dikerjakan, `[x]` selesai (lint bersih + tes
 
 ## Stage 4 — Chart & Diagram Rendering
 
-- [ ] `chartRenderService` (chartjs-node-canvas) → PNG
-- [ ] Unit test `chartRenderService` (data valid → file dihasilkan; data invalid → error ditangani)
-- [ ] `diagramRenderService` (mermaid-cli via child_process) → SVG/PNG
-- [ ] Unit test `diagramRenderService` (mock child_process call)
-- [ ] Extend prompt `contentService` agar AI hasilkan blok chart/diagram bila relevan
-- [ ] Validasi: bab dengan data numerik → chart ter-render; bab dengan alur konsep → diagram ter-render
+- [x] `chartRenderService` (chartjs-node-canvas) → PNG
+- [x] Unit test `chartRenderService` (data valid → file dihasilkan; data invalid → error ditangani)
+- [x] `diagramRenderService` (mermaid-cli via child_process) → SVG/PNG
+- [x] Unit test `diagramRenderService` (mock child_process call)
+- [x] Extend prompt `contentService` agar AI hasilkan blok chart/diagram bila relevan
+- [x] Validasi: bab dengan data numerik → chart ter-render; bab dengan alur konsep → diagram ter-render
 
 ## Stage 5 — Gambar (AI + Upload Manual)
 
@@ -125,3 +125,11 @@ Konvensi: `[ ]` belum, `[~]` sedang dikerjakan, `[x]` selesai (lint bersih + tes
       `GET /api/buku`/`GET /api/buku/:id` di Stage 2. `PUT /api/bab/:id/blok/:blokId` (edit manual satu blok)
       belum diimplementasikan — bukan bagian kriteria validasi Stage 3, ditunda ke stage yang butuh (mis. saat
       guru perlu koreksi manual sebelum export).
+- [x] Env var `STORAGE_DIR` (default `./data/storage`) ditambahkan di Stage 4 — belum ada di `planning.md`/
+      `AGENT_PROMPT.md` karena stage sebelumnya belum butuh folder output file. Dipakai `chartRenderService`/
+      `diagramRenderService` untuk simpan hasil render (`storage/chart/`, `storage/diagram/`), diteruskan lewat
+      `AppOptions.storageDir` → `babRoutes`. Folder ini nanti dipakai juga di Stage 5 (upload gambar) dan Stage 6
+      (file export), jadi bukan keputusan sekali pakai.
+- [x] `GET /api/bab/:id` sekarang ikut mengembalikan `file_path` per blok (sebelumnya cuma `id/urutan/tipe/data`)
+      — perlu supaya klien tahu chart/diagram sudah/belum selesai dirender. Bukan endpoint baru, cuma field
+      tambahan di response yang sudah ada.

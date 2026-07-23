@@ -67,7 +67,7 @@ Tidak ada perubahan kode yang dianggap selesai tanpa ini, termasuk perubahan kec
 - [x] Stage 1 — Scaffold & Database
 - [x] Stage 2 — Outline & Bab
 - [x] Stage 3 — Generate Konten Bab (Teks + Tabel)
-- [ ] Stage 4 — Chart & Diagram Rendering
+- [x] Stage 4 — Chart & Diagram Rendering
 - [ ] Stage 5 — Gambar (AI + Upload Manual)
 - [ ] Stage 6 — Export DOCX + PDF
 - [ ] Stage 7 — Bot Telegram

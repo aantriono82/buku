@@ -23,6 +23,8 @@ describe('buildContentPrompt', () => {
     expect(system).toContain('JSON');
     expect(system).toContain('teks');
     expect(system).toContain('tabel');
+    expect(system).toContain('chart');
+    expect(system).toContain('diagram');
     expect(user).toContain('Matematika Dasar');
     expect(user).toContain('SD Kelas 4');
     expect(user).toContain('Kurikulum Merdeka');
@@ -116,8 +118,41 @@ describe('parseContentResponse', () => {
   });
 
   it('melempar error kalau tipe blok tidak dikenal', () => {
-    const raw = JSON.stringify({ blok: [{ tipe: 'chart', data: {} }] });
-    expect(() => parseContentResponse(raw)).toThrow('tipe tidak dikenal: "chart"');
+    const raw = JSON.stringify({ blok: [{ tipe: 'video', data: {} }] });
+    expect(() => parseContentResponse(raw)).toThrow('tipe tidak dikenal: "video"');
+  });
+
+  it('parse blok chart yang valid', () => {
+    const raw = JSON.stringify({
+      blok: [
+        {
+          tipe: 'chart',
+          data: { chart_type: 'bar', labels: ['A', 'B'], datasets: [{ label: 'Nilai', data: [1, 2] }] },
+        },
+      ],
+    });
+    expect(parseContentResponse(raw)).toEqual([
+      { tipe: 'chart', data: { chart_type: 'bar', labels: ['A', 'B'], datasets: [{ label: 'Nilai', data: [1, 2] }] } },
+    ]);
+  });
+
+  it('melempar error kalau blok chart tidak punya data chart yang valid', () => {
+    const raw = JSON.stringify({ blok: [{ tipe: 'chart', data: { chart_type: 'scatter' } }] });
+    expect(() => parseContentResponse(raw)).toThrow('bertipe chart tidak punya data chart yang valid');
+  });
+
+  it('parse blok diagram yang valid', () => {
+    const raw = JSON.stringify({
+      blok: [{ tipe: 'diagram', data: { mermaid_syntax: 'flowchart TD\nA-->B', judul: 'Alur' } }],
+    });
+    expect(parseContentResponse(raw)).toEqual([
+      { tipe: 'diagram', data: { mermaid_syntax: 'flowchart TD\nA-->B', judul: 'Alur' } },
+    ]);
+  });
+
+  it('melempar error kalau blok diagram tidak punya mermaid_syntax yang valid', () => {
+    const raw = JSON.stringify({ blok: [{ tipe: 'diagram', data: { mermaid_syntax: '   ' } }] });
+    expect(() => parseContentResponse(raw)).toThrow('bertipe diagram tidak punya mermaid_syntax yang valid');
   });
 });
 

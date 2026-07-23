@@ -4,6 +4,7 @@ export interface AppConfig extends TextProviderCredentials {
   PORT: number;
   NODE_ENV: string;
   DB_PATH: string;
+  STORAGE_DIR: string;
   ADMIN_USERNAME: string;
   ADMIN_PASSWORD: string;
   FRONTEND_URL: string;
@@ -14,6 +15,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     PORT: Number(env.PORT) || 3011,
     NODE_ENV: env.NODE_ENV || 'development',
     DB_PATH: env.DB_PATH || './data/buku.db',
+    STORAGE_DIR: env.STORAGE_DIR || './data/storage',
     ADMIN_USERNAME: env.ADMIN_USERNAME || '',
     ADMIN_PASSWORD: env.ADMIN_PASSWORD || '',
     FRONTEND_URL: env.FRONTEND_URL || 'http://localhost:5183',

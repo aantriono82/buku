@@ -13,6 +13,7 @@ const app = createApp({
   frontendUrl: config.FRONTEND_URL,
   isProduction: config.NODE_ENV === 'production',
   credentials: config,
+  storageDir: config.STORAGE_DIR,
 });
 
 app.listen(config.PORT, () => {

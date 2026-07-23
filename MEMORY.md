@@ -15,6 +15,67 @@ Log keputusan teknis, masalah yang pernah ditemui, dan catatan progres antar ses
 **Dampak**: bagian kode/desain mana yang terpengaruh
 ```
 
+### [2026-07-23] Stage 4 selesai — chartRenderService, diagramRenderService, wiring ke `POST /api/bab/:id/generate`
+**Konteks**: lanjutan Stage 3, menambahkan render chart (chartjs-node-canvas) dan diagram (mermaid-cli) untuk blok
+yang sudah bisa dihasilkan `contentService` sejak stage ini (sebelumnya dibatasi cuma teks & tabel).
+**Keputusan/temuan**:
+- `chartjs-node-canvas` butuh native dep `canvas` (binding cairo/pango). Cek dulu sebelum asumsi bakal gagal di
+  environment CI/VPS nanti: `npm install chartjs-node-canvas chart.js` di sandbox ini **berhasil pakai prebuilt
+  binary** (tidak compile dari source) meski `pkg-config --exists cairo` bilang cairo tidak terpasang di OS level
+  — jadi tidak perlu install `libcairo2-dev` dkk secara eksplisit di Dockerfile backend (Stage 8) kecuali platform
+  target beda arch/libc dari yang didukung binary prebuilt `node-canvas` (linux x64 glibc). Kalau nanti build image
+  Docker gagal di step ini, itu petunjuk platform image base beda (mis. Alpine musl vs glibc) — ganti base image
+  Debian/Ubuntu dulu sebelum coba compile dari source.
+- `@mermaid-js/mermaid-cli` men-download Chromium via Puppeteer saat `npm install` — di sandbox ini **berhasil**
+  (beda dari kejadian `playwright install` yang macet, dicatat di entri 2026-07-22), tapi makan waktu >2 menit
+  (proses sempat auto-pindah ke background job). **Kalau install lain kali terasa macet, tunggu lebih lama dulu
+  sebelum menyimpulkan jaringan diblokir** — kasus playwright yang gagal itu beda paket/CDN dari yang dipakai
+  puppeteer/mermaid-cli.
+- `renderChart()`/`renderDiagram()` divalidasi dengan **benar-benar merender** (bukan mock) di unit test masing-
+  masing — beda dari instruksi "mock dependency eksternal" di `AGENT_PROMPT.md`, karena kedua ini bukan pemanggilan
+  API jaringan atau proses `child_process` yang mahal/tidak deterministik (chartjs-node-canvas: library lokal murni,
+  cepat; mermaid-cli: memang `child_process`, tapi divalidasi juga jalan real lewat smoke test manual — lihat di
+  bawah). Konsisten dengan instruksi: "test boleh fokus ke logic, dependency eksternal di-mock" — mmdc DI-mock di
+  `diagram-render-service.test.ts` lewat parameter `spawnImpl` yang di-inject (bukan mock module-level), supaya
+  test tetap deterministik/cepat tanpa Chromium beneran, tapi kode produksi tetap bisa dipanggil `spawn` asli.
+- Di `routes/bab.ts`, render chart/diagram dilakukan **sinkron di dalam request SSE** (`await Promise.all(...)`
+  setelah blok tersimpan ke DB, sebelum event `done` dikirim) — bukan job async terpisah/background worker asli,
+  meski `planning.md` §4 menyebut "dirender di background". Diinterpretasikan sebagai "server-side" (bukan
+  di-render di client), bukan literal async job queue, karena bab generate memang sudah satu request panjang dan
+  tidak ada infrastruktur job queue di project ini. **Kalau nanti render chart/diagram jadi lambat/blocking terlalu
+  lama untuk bab dengan banyak chart, ini titik yang perlu direvisi jadi job queue/worker asli** — belum terjadi di
+  pemakaian sekarang.
+- **Kegagalan render satu blok chart/diagram TIDAK menggagalkan seluruh generate bab** — `renderVisualBlok()`
+  nangkep error-nya sendiri (log ke `console.error`), `file_path` tetap `null`, bab tetap `status = 'selesai'`
+  kalau AI-nya sendiri berhasil. Alasan: blok teks/tabel di bab yang sama tetap valid dan berharga meski satu chart
+  gagal dirender (mis. data chart dari AI aneh/tidak lolos validasi `isValidChartData`) — tidak masuk akal
+  menghapus seluruh hasil kerja AI karena satu visualisasi gagal.
+- `STORAGE_DIR` (default `./data/storage`) ditambahkan sebagai config baru (`config.ts`, `.env.example`,
+  `AppOptions.storageDir` di `app.ts`) — subfolder `chart/` dan `diagram/` dibuat otomatis oleh masing-masing
+  service (`fs.mkdir(..., { recursive: true })`). Sudah masuk `.gitignore` lewat pola `backend/data/` yang sudah
+  ada dari Stage 1.
+- `GET /api/bab/:id` sekarang menyertakan `file_path` per blok (sebelumnya cuma `id/urutan/tipe/data`) supaya
+  frontend/klien lain tahu status render chart/diagram. Field ini tidak dipakai UI di stage ini (Stage 4 tidak ada
+  task frontend di `TASKS.md`), tapi datanya sudah tersedia dari backend.
+- Skema `data_json` untuk `tipe: chart` dan `tipe: diagram` **persis mengikuti** yang sudah didefinisikan di
+  `planning.md` §3 (tidak ada penyimpangan): chart = `{chart_type, labels, datasets, judul?}`, diagram =
+  `{mermaid_syntax, judul?}`. Validasi (`isValidChartData`/`isValidDiagramData`) ditaruh di
+  `chart-render-service.ts`/`diagram-render-service.ts` (bukan di `content-service.ts`) dan di-reuse oleh
+  `content-service.ts` untuk parsing blok dari respons AI — satu sumber kebenaran validasi dipakai dua tempat
+  (parsing & rendering), supaya blok yang lolos parse dijamin juga valid untuk dirender.
+- Validasi end-to-end dilakukan lewat test integrasi sekali pakai (supertest, boot `createApp()` beneran, mock
+  cuma `generateText` di level paling luar/`ai-text-client.js` supaya `contentService` + `chartRenderService` +
+  `diagramRenderService` semua jalan asli) — konfirmasi PNG (`89504e47` magic bytes) dan SVG (`<svg`) benar-benar
+  ditulis ke `STORAGE_DIR` sementara (`os.tmpdir()`), lalu file test dihapus (bukan bagian dari suite permanen,
+  cuma smoke check manual sesi ini — tidak perlu diulang kecuali curiga regresi).
+**Dampak**: file baru `backend/src/services/chart-render-service.ts`, `diagram-render-service.ts`, test-nya;
+`content-service.ts` (tipe `BlokChart`/`BlokDiagram`, parsing, prompt) & test-nya; `routes/bab.ts`
+(`renderVisualBlok`, `BabRoutesOptions.storageDir`) & test-nya; `config.ts`/`.env.example`/`app.ts`/`index.ts`
+(`STORAGE_DIR`). Dependency baru: `chartjs-node-canvas`, `chart.js`, `@mermaid-js/mermaid-cli`. Test: 104 test
+backend lulus (13 baru: 7 chart-render, 6 diagram-render, +4 di content-service, +2 di bab routes — angka tidak pas
+13 karena beberapa test lama disesuaikan, bukan ditambah), lint (`eslint` + `prettier --check`) dan `tsc --noEmit`
+bersih.
+
 ### [2026-07-23] Stage 3 selesai — contentService, `POST /api/bab/:id/generate`, halaman detail bab
 **Konteks**: implementasi generate konten bab (teks + tabel) mengikuti pola yang sudah terbukti di Stage 2
 (`outlineService` + SSE + multi-provider `generateText()`), termasuk fix half-close SSE yang sudah didokumentasikan.
@@ -204,7 +265,15 @@ _(kosong — isi saat menemukan masalah non-trivial selama development, misalnya
 - Rate limit & retry strategy untuk Gemini Image API saat generate banyak gambar sekaligus
 - Ukuran final Docker image backend setelah LibreOffice + Chromium (mermaid-cli) ditambahkan — apakah perlu dipisah jadi service tersendiri
 - Estimasi waktu generate 1 bab penuh untuk kalibrasi timeout SSE
-- Prompt engineering untuk menentukan kapan materi "layak" divisualisasikan sebagai chart/diagram vs cukup teks
+- Prompt engineering untuk menentukan kapan materi "layak" divisualisasikan sebagai chart/diagram vs cukup teks —
+  instruksi sudah ditambahkan di `contentService` prompt Stage 4 ("HANYA bila cocok, jangan paksakan"), tapi belum
+  pernah dites ke provider AI asli (tidak ada API key di sandbox ini) untuk lihat apakah AI benar-benar selektif
+  atau malah selalu/tidak pernah menyisipkan chart/diagram
+- Waktu render chart/diagram saat ini **blocking di dalam request SSE** `POST /api/bab/:id/generate` (lihat entri
+  Stage 4 di atas) — untuk 1-2 chart/diagram per bab harusnya masih cepat (render manual di sandbox ini < 1 detik
+  per chart, mermaid-cli sedikit lebih lambat karena boot Chromium tiap panggilan), tapi kalau AI ternyata
+  menghasilkan banyak chart/diagram sekaligus dalam satu bab, ini bisa menambah signifikan waktu tunggu SSE
+  sebelum event `done` — belum diukur dengan bab yang benar-benar berisi banyak visualisasi
 - Jalur `generateText()` untuk OpenCode Zen, Google AI, Anthropic, OpenAI, DeepSeek belum pernah dites ke API
   aslinya (cuma OpenRouter yang di-smoke-test dengan key palsu dan benar-benar hit endpoint asli, error 401
   balik dengan benar). Base URL & format request disalin dari `rpp-generator` yang sudah terbukti jalan di sana,

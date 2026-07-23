@@ -6,8 +6,16 @@ import request from 'supertest';
 vi.mock('../../services/content-service.js', () => ({
   generateContent: vi.fn(),
 }));
+vi.mock('../../services/chart-render-service.js', () => ({
+  renderChart: vi.fn(),
+}));
+vi.mock('../../services/diagram-render-service.js', () => ({
+  renderDiagram: vi.fn(),
+}));
 
 import { generateContent } from '../../services/content-service.js';
+import { renderChart } from '../../services/chart-render-service.js';
+import { renderDiagram } from '../../services/diagram-render-service.js';
 import { initDb, closeDb } from '../../db/connection.js';
 import { seedAdminIfMissing } from '../../db/seed-admin.js';
 import { createApp } from '../../app.js';
@@ -15,6 +23,8 @@ import { clearSessionsForTest } from '../../lib/session-store.js';
 import { DEFAULT_TEXT_PROVIDER_CREDENTIALS, type TextProviderCredentials } from '../../services/ai-providers.js';
 
 const mockedGenerateContent = vi.mocked(generateContent);
+const mockedRenderChart = vi.mocked(renderChart);
+const mockedRenderDiagram = vi.mocked(renderDiagram);
 
 const credentialsWithOpenRouter: TextProviderCredentials = {
   ...DEFAULT_TEXT_PROVIDER_CREDENTIALS,
@@ -44,6 +54,7 @@ describe('bab routes', () => {
       frontendUrl: 'http://localhost:5183',
       isProduction: false,
       credentials: credentialsWithOpenRouter,
+      storageDir: './test-storage',
     });
 
     agent = request.agent(app);
@@ -98,6 +109,7 @@ describe('bab routes', () => {
         frontendUrl: 'http://localhost:5183',
         isProduction: false,
         credentials: DEFAULT_TEXT_PROVIDER_CREDENTIALS,
+        storageDir: './test-storage',
       });
       const { babId } = await createBukuWithBab();
 
@@ -167,6 +179,59 @@ describe('bab routes', () => {
         'Versi baru 1',
         'Versi baru 2',
       ]);
+    });
+
+    it('merender blok chart & diagram lalu simpan file_path ke DB', async () => {
+      mockedRenderChart.mockResolvedValue('/data/storage/chart/chart-1.png');
+      mockedRenderDiagram.mockResolvedValue('/data/storage/diagram/diagram-1.svg');
+      mockedGenerateContent.mockResolvedValue({
+        blok: [
+          {
+            tipe: 'chart',
+            data: { chart_type: 'bar', labels: ['A'], datasets: [{ label: 'Nilai', data: [1] }] },
+          },
+          { tipe: 'diagram', data: { mermaid_syntax: 'flowchart TD\nA-->B' } },
+        ],
+        rawResponse: '{}',
+      });
+
+      const { babId } = await createBukuWithBab();
+      const res = await agent.post(`/api/bab/${babId}/generate`).send({ provider: 'openrouter' });
+
+      expect(res.status).toBe(200);
+      expect(mockedRenderChart).toHaveBeenCalledTimes(1);
+      expect(mockedRenderDiagram).toHaveBeenCalledTimes(1);
+      expect(res.text).toContain('/data/storage/chart/chart-1.png');
+      expect(res.text).toContain('/data/storage/diagram/diagram-1.svg');
+
+      const detail = await agent.get(`/api/bab/${babId}`);
+      expect(detail.body.blok[0]).toMatchObject({ tipe: 'chart', file_path: '/data/storage/chart/chart-1.png' });
+      expect(detail.body.blok[1]).toMatchObject({ tipe: 'diagram', file_path: '/data/storage/diagram/diagram-1.svg' });
+    });
+
+    it('kegagalan render chart tidak menggagalkan seluruh generate bab (blok lain tetap tersimpan)', async () => {
+      mockedRenderChart.mockRejectedValue(new Error('canvas gagal'));
+      mockedGenerateContent.mockResolvedValue({
+        blok: [
+          { tipe: 'teks', data: { markdown: 'Isi teks' } },
+          {
+            tipe: 'chart',
+            data: { chart_type: 'bar', labels: ['A'], datasets: [{ label: 'Nilai', data: [1] }] },
+          },
+        ],
+        rawResponse: '{}',
+      });
+
+      const { babId } = await createBukuWithBab();
+      const res = await agent.post(`/api/bab/${babId}/generate`).send({ provider: 'openrouter' });
+
+      expect(res.status).toBe(200);
+      expect(res.text).toContain('"done":true');
+
+      const detail = await agent.get(`/api/bab/${babId}`);
+      expect(detail.body.status).toBe('selesai');
+      expect(detail.body.blok).toHaveLength(2);
+      expect(detail.body.blok[1]).toMatchObject({ tipe: 'chart', file_path: null });
     });
 
     it('mengirim event error dan set status bab error kalau generateContent gagal', async () => {
